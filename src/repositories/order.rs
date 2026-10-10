@@ -1,6 +1,7 @@
 use surrealdb::types::RecordId;
 
 use crate::executor::Executor;
+use crate::models::CountRow;
 use crate::models::order::{NewOrder, OrderPage, OrderRecord, StatusChange};
 
 pub async fn create(ex: &Executor<'_>, data: NewOrder) -> surrealdb::Result<Option<OrderRecord>> {
@@ -98,4 +99,19 @@ pub async fn change_status(
         )
         .await?;
     Ok(rows.into_iter().next())
+}
+
+/// Quantos pedidos casam com o filtro de status (sem filtro, todos), independente de
+/// página. É o total da listagem de admin.
+pub async fn count_matching(ex: &Executor<'_>, status: Option<String>) -> surrealdb::Result<i64> {
+    let rows: Vec<CountRow> = ex
+        .query_all(
+            "SELECT count() AS count FROM order \
+             WHERE ($filter = NONE OR status = $filter) GROUP ALL",
+            "filter",
+            status,
+        )
+        .await?;
+    // Sem nenhum registro o `GROUP ALL` pode não devolver linha nenhuma.
+    Ok(rows.first().map_or(0, |row| row.count))
 }

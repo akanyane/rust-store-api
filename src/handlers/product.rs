@@ -6,6 +6,7 @@ use axum::{
 
 use crate::error::AppError;
 use crate::extractors::{AuthAdmin, ValidatedJson, ValidatedQuery};
+use crate::handlers::total_count;
 use crate::models::product::{
     CreateProduct, ListProductsQuery, ListPublicProductsQuery, Product, ProductDetail,
     UpdateProduct,
@@ -19,10 +20,7 @@ pub async fn list_products(
     ValidatedQuery(query): ValidatedQuery<ListPublicProductsQuery>,
 ) -> Result<([(HeaderName, String); 1], Json<Vec<Product>>), AppError> {
     let (products, total) = product_service::list_products(&state.db, query).await?;
-    Ok((
-        [(HeaderName::from_static("x-total-count"), total.to_string())],
-        Json(products),
-    ))
+    Ok((total_count(total), Json(products)))
 }
 
 pub async fn get_product(
@@ -65,9 +63,9 @@ pub async fn admin_list_products(
     State(state): State<AppState>,
     _admin: AuthAdmin,
     ValidatedQuery(query): ValidatedQuery<ListProductsQuery>,
-) -> Result<Json<Vec<Product>>, AppError> {
-    let products = product_service::admin_list_products(&state.db, query).await?;
-    Ok(Json(products))
+) -> Result<([(HeaderName, String); 1], Json<Vec<Product>>), AppError> {
+    let (products, total) = product_service::admin_list_products(&state.db, query).await?;
+    Ok((total_count(total), Json(products)))
 }
 
 pub async fn admin_get_product(

@@ -48,7 +48,7 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 | DELETE | `/products/{id}` | admin | Desativa o produto (exclusão lógica) |
 | PUT | `/products/{id}/variants/{variant_id}` | admin | Substitui nome, SKU, preço, estoque e `active` da variante |
 | DELETE | `/products/{id}/variants/{variant_id}` | admin | Desativa a variante (exclusão lógica) |
-| GET | `/admin/products` | admin | Lista produtos ativos e inativos (`?active=`, `?sort=`, `?limit=`, `?offset=`) |
+| GET | `/admin/products` | admin | Lista produtos ativos e inativos (`?active=`, `?sort=`, `?limit=`, `?offset=`; total em `X-Total-Count`) |
 | GET | `/admin/products/{id}` | admin | Detalha o produto (mesmo inativo) com todas as variantes, inclusive as inativas |
 | GET, PUT, DELETE | `/me` | cliente | Consulta, atualiza e remove o próprio cadastro |
 | GET | `/cart` | cliente | Consulta o carrinho |
@@ -59,7 +59,7 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 | GET | `/orders/{id}` | cliente | Detalha um pedido do cliente |
 | POST | `/orders/{id}/cancel` | cliente | Cancela um pedido pendente e devolve o estoque |
 | POST | `/orders/{id}/pay` | cliente | Pagamento simulado de um pedido pendente |
-| GET | `/admin/orders` | admin | Lista os pedidos de todos os clientes (`?status=`, `?limit=`, `?offset=`) |
+| GET | `/admin/orders` | admin | Lista os pedidos de todos os clientes (`?status=`, `?limit=`, `?offset=`; total em `X-Total-Count`) |
 | GET | `/admin/orders/{id}` | admin | Detalha qualquer pedido |
 | PUT | `/admin/orders/{id}/status` | admin | Muda o status do pedido |
 
@@ -144,6 +144,10 @@ As variantes (`GET /products/{id}/variants`, o `variants` do detalhe público e 
 A paginação é **opcional**: sem `limit`, `GET /products` devolve todos os ativos, como sempre devolveu (não há limite padrão que corte o catálogo). Com `?limit=` (1 a 200) e `?offset=` (a partir de 0) a rota devolve uma página; só `offset` devolve o resto a partir dali. As páginas seguem a ordem de `sort` e nunca incluem produtos inativos. Valores inválidos devolvem `422`.
 
 O corpo continua sendo a lista simples, e o cabeçalho `X-Total-Count` traz quantos produtos ativos existem no total, independente da página (`0` se não houver nenhum). A contagem e a página são duas leituras separadas: se um produto for criado entre elas, o total pode ficar defasado em uma unidade.
+
+## Total nas listagens de admin
+
+`GET /admin/products` e `GET /admin/orders` trazem o cabeçalho `X-Total-Count`, e o corpo continua sendo a lista simples. O total **respeita o filtro** (`?active=` nos produtos, `?status=` nos pedidos) e **ignora `limit` e `offset`**: é quantos itens existem naquela visão, para saber quantas páginas ela tem. Sem filtro conta tudo (produtos ativos e inativos, pedidos de todos os status). Se nada casar, o total é `0`, e não ausente. A contagem e a página são duas leituras separadas, então um registro criado entre elas pode deixar o total defasado em uma unidade.
 
 ## Data de criação do produto
 

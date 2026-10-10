@@ -366,14 +366,16 @@ async fn pay_order_once(
     build_view(paid, items)
 }
 
-/// Pedidos de todos os clientes, com filtro opcional de status e paginação.
+/// Pedidos de todos os clientes, com filtro opcional de status e paginação, e o total que casa
+/// com o filtro (independente de `limit` e `offset`).
 pub async fn admin_list_orders(
     db: &Surreal<Any>,
     query: ListOrdersQuery,
-) -> Result<Vec<AdminOrderView>, AppError> {
+) -> Result<(Vec<AdminOrderView>, i64), AppError> {
     let ex = Executor::Db(db);
+    let status = query.status.map(|status| status.as_str().to_string());
     let page = OrderPage {
-        status: query.status.map(|status| status.as_str().to_string()),
+        status: status.clone(),
         limit: query.limit.unwrap_or(DEFAULT_PAGE_SIZE),
         offset: query.offset.unwrap_or(0),
     };
@@ -385,11 +387,14 @@ pub async fn admin_list_orders(
         .collect();
     let views = views_for(&ex, orders).await?;
 
-    Ok(owners
+    let total = order_repo::count_matching(&ex, status).await?;
+
+    let views = owners
         .into_iter()
         .zip(views)
         .map(|(customer_id, order)| AdminOrderView { customer_id, order })
-        .collect())
+        .collect();
+    Ok((views, total))
 }
 
 pub async fn admin_get_order(

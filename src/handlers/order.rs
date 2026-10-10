@@ -1,11 +1,12 @@
 use axum::{
     Json,
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderName, StatusCode},
 };
 
 use crate::error::AppError;
 use crate::extractors::{AuthAdmin, AuthCustomer, ValidatedJson, ValidatedQuery};
+use crate::handlers::total_count;
 use crate::models::order::{AdminOrderView, ListOrdersQuery, OrderView, UpdateOrderStatus};
 use crate::services::order as order_service;
 use crate::state::AppState;
@@ -57,9 +58,9 @@ pub async fn admin_list_orders(
     State(state): State<AppState>,
     _admin: AuthAdmin,
     ValidatedQuery(query): ValidatedQuery<ListOrdersQuery>,
-) -> Result<Json<Vec<AdminOrderView>>, AppError> {
-    let orders = order_service::admin_list_orders(&state.db, query).await?;
-    Ok(Json(orders))
+) -> Result<([(HeaderName, String); 1], Json<Vec<AdminOrderView>>), AppError> {
+    let (orders, total) = order_service::admin_list_orders(&state.db, query).await?;
+    Ok((total_count(total), Json(orders)))
 }
 
 pub async fn admin_get_order(

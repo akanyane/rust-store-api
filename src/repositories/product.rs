@@ -1,8 +1,9 @@
 use surrealdb::types::{RecordId, SurrealValue};
 
 use crate::executor::Executor;
+use crate::models::CountRow;
 use crate::models::product::{
-    ActivePage, CountRow, NewProduct, ProductChanges, ProductPage, ProductRecord, ProductSort,
+    ActivePage, NewProduct, ProductChanges, ProductPage, ProductRecord, ProductSort,
 };
 
 /// Uma página de produtos ativos, por nome ou do mais recente para o mais antigo (os sem
@@ -118,4 +119,19 @@ pub async fn find_page(
         }
     };
     ex.query_all(query, "page", page).await
+}
+
+/// Quantos produtos casam com o filtro de `active` (sem filtro, todos), independente de
+/// página. É o total da listagem de admin.
+pub async fn count_matching(ex: &Executor<'_>, active: Option<bool>) -> surrealdb::Result<i64> {
+    let rows: Vec<CountRow> = ex
+        .query_all(
+            "SELECT count() AS count FROM product \
+             WHERE ($filter = NONE OR active = $filter) GROUP ALL",
+            "filter",
+            active,
+        )
+        .await?;
+    // Sem nenhum registro o `GROUP ALL` pode não devolver linha nenhuma.
+    Ok(rows.first().map_or(0, |row| row.count))
 }

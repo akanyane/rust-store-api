@@ -8,8 +8,14 @@ pub mod session;
 pub mod user;
 pub mod variant;
 
-use surrealdb::types::{RecordId, RecordIdKey};
+use surrealdb::types::{RecordId, RecordIdKey, SurrealValue};
 use validator::ValidationError;
+
+/// Uma linha de `SELECT count() ... GROUP ALL`.
+#[derive(Debug, SurrealValue)]
+pub struct CountRow {
+    pub count: i64,
+}
 
 /// Tamanho de página das listagens de admin quando `limit` não é informado.
 pub const DEFAULT_PAGE_SIZE: i64 = 50;

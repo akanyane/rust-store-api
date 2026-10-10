@@ -545,3 +545,116 @@ async fn an_order_cancelled_by_the_admin_never_gets_a_paid_at() {
     assert_eq!(status, StatusCode::OK);
     assert!(order["paid_at"].is_null(), "{order}");
 }
+
+/// Devolve o `X-Total-Count` e quantos itens vieram no corpo.
+async fn orders_total_and_len(app: &TestApp, admin: &str, query: &str) -> (Option<String>, usize) {
+    let (status, headers, body) = super::send_full(
+        &app.router,
+        "GET",
+        &format!("/admin/orders{query}"),
+        Some(admin),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{query}");
+    let total = headers
+        .get("x-total-count")
+        .map(|value| value.to_str().unwrap().to_string());
+    (total, body.as_array().unwrap().len())
+}
+
+#[tokio::test]
+async fn the_admin_order_total_matches_the_status_filter_and_ignores_limit_and_offset() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let mug = app.setup_product(&admin, "Mug", 10, 50).await;
+    // 3 pending, 2 paid, 1 shipped, 1 cancelled (7 no total).
+    for (state, times) in [
+        ("pending", 3),
+        ("paid", 2),
+        ("shipped", 1),
+        ("cancelled", 1),
+    ] {
+        for _ in 0..times {
+            order_in_state(&app, &admin, &customer, &mug, state).await;
+        }
+    }
+
+    assert_eq!(
+        orders_total_and_len(&app, &admin, "").await,
+        (Some("7".into()), 7)
+    );
+    for (status, expected) in [
+        ("pending", 3),
+        ("paid", 2),
+        ("shipped", 1),
+        ("cancelled", 1),
+        ("delivered", 0),
+    ] {
+        assert_eq!(
+            orders_total_and_len(&app, &admin, &format!("?status={status}")).await,
+            (Some(expected.to_string()), expected),
+            "status {status}"
+        );
+    }
+
+    // `limit` e `offset` cortam o corpo, mas não o total.
+    assert_eq!(
+        orders_total_and_len(&app, &admin, "?limit=2").await,
+        (Some("7".into()), 2)
+    );
+    assert_eq!(
+        orders_total_and_len(&app, &admin, "?status=pending&limit=1&offset=1").await,
+        (Some("3".into()), 1)
+    );
+    assert_eq!(
+        orders_total_and_len(&app, &admin, "?status=paid&offset=99").await,
+        (Some("2".into()), 0)
+    );
+
+    // Mudar o status de um pedido move a contagem de um filtro para o outro.
+    let (_, pending) = app
+        .send(
+            "GET",
+            "/admin/orders?status=pending&limit=1",
+            Some(&admin),
+            None,
+        )
+        .await;
+    let order_id = pending[0]["id"].as_str().unwrap().to_string();
+    set_status(&app, &admin, &order_id, "paid").await;
+    assert_eq!(
+        orders_total_and_len(&app, &admin, "?status=pending")
+            .await
+            .0
+            .as_deref(),
+        Some("2")
+    );
+    assert_eq!(
+        orders_total_and_len(&app, &admin, "?status=paid")
+            .await
+            .0
+            .as_deref(),
+        Some("3")
+    );
+    assert_eq!(
+        orders_total_and_len(&app, &admin, "").await.0.as_deref(),
+        Some("7")
+    );
+}
+
+#[tokio::test]
+async fn the_admin_order_total_is_zero_not_missing_when_there_are_no_orders() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+
+    assert_eq!(
+        orders_total_and_len(&app, &admin, "").await,
+        (Some("0".into()), 0)
+    );
+    assert_eq!(
+        orders_total_and_len(&app, &admin, "?status=paid").await,
+        (Some("0".into()), 0)
+    );
+}

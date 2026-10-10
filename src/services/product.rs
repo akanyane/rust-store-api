@@ -61,19 +61,22 @@ async fn detail_of(
     ))
 }
 
-/// Produtos de qualquer status, para o admin achar o que foi desativado e reativar.
+/// Produtos de qualquer status, para o admin achar o que foi desativado e reativar, e o total
+/// que casa com o filtro `active` (independente de `limit` e `offset`).
 pub async fn admin_list_products(
     db: &Surreal<Any>,
     query: ListProductsQuery,
-) -> Result<Vec<Product>, AppError> {
+) -> Result<(Vec<Product>, i64), AppError> {
+    let ex = Executor::Db(db);
     let page = ProductPage {
         active: query.active,
         limit: query.limit.unwrap_or(DEFAULT_PAGE_SIZE),
         offset: query.offset.unwrap_or(0),
     };
     let sort = query.sort.unwrap_or_default();
-    let records = product_repo::find_page(&Executor::Db(db), page, sort).await?;
-    Ok(records.into_iter().map(Product::from).collect())
+    let records = product_repo::find_page(&ex, page, sort).await?;
+    let total = product_repo::count_matching(&ex, query.active).await?;
+    Ok((records.into_iter().map(Product::from).collect(), total))
 }
 
 /// Detalhe para o admin: mesmo com o produto inativo, e com todas as variantes.

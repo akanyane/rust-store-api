@@ -139,12 +139,6 @@ pub struct ActivePage {
     pub offset: i64,
 }
 
-/// Uma linha de `SELECT count() ... GROUP ALL`.
-#[derive(Debug, SurrealValue)]
-pub struct CountRow {
-    pub count: i64,
-}
-
 #[derive(Debug, Deserialize, Validate)]
 pub struct ListProductsQuery {
     pub active: Option<bool>,

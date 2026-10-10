@@ -503,3 +503,114 @@ async fn an_unknown_sort_is_422() {
         assert_eq!(body["error"], "Invalid query parameters", "{query}");
     }
 }
+
+/// Devolve o `X-Total-Count` e quantos itens vieram no corpo.
+async fn total_and_len(app: &TestApp, admin: &str, query: &str) -> (Option<String>, usize) {
+    let (status, headers, body) = super::send_full(
+        &app.router,
+        "GET",
+        &format!("/admin/products{query}"),
+        Some(admin),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{query}");
+    let total = headers
+        .get("x-total-count")
+        .map(|value| value.to_str().unwrap().to_string());
+    (total, body.as_array().unwrap().len())
+}
+
+#[tokio::test]
+async fn the_admin_total_matches_the_filter_and_ignores_limit_and_offset() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let mut items = Vec::new();
+    for n in 1..=5 {
+        items.push(app.setup_product(&admin, &format!("P{n:02}"), 10, 5).await);
+    }
+    // 3 ativos (P01, P03, P05) e 2 inativos (P02, P04).
+    deactivate_product(&app, &admin, &items[1]).await;
+    deactivate_product(&app, &admin, &items[3]).await;
+
+    // Sem filtro: tudo; com filtro: só o que casa. Sem paginar, o corpo fecha com o total.
+    assert_eq!(total_and_len(&app, &admin, "").await, (Some("5".into()), 5));
+    assert_eq!(
+        total_and_len(&app, &admin, "?active=true").await,
+        (Some("3".into()), 3)
+    );
+    assert_eq!(
+        total_and_len(&app, &admin, "?active=false").await,
+        (Some("2".into()), 2)
+    );
+
+    // `limit` e `offset` cortam o corpo, mas não o total.
+    assert_eq!(
+        total_and_len(&app, &admin, "?limit=2").await,
+        (Some("5".into()), 2)
+    );
+    assert_eq!(
+        total_and_len(&app, &admin, "?active=false&limit=1").await,
+        (Some("2".into()), 1)
+    );
+    assert_eq!(
+        total_and_len(&app, &admin, "?active=true&limit=1&offset=2").await,
+        (Some("3".into()), 1)
+    );
+    assert_eq!(
+        total_and_len(&app, &admin, "?active=true&offset=99").await,
+        (Some("3".into()), 0)
+    );
+    assert_eq!(
+        total_and_len(&app, &admin, "?sort=newest&limit=1").await,
+        (Some("5".into()), 1)
+    );
+
+    // Reativar um produto move a contagem de um filtro para o outro.
+    let (status, _) = app
+        .send(
+            "PUT",
+            &format!("/products/{}", items[1].product_id),
+            Some(&admin),
+            Some(json!({ "name": "P02", "description": "d", "active": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        total_and_len(&app, &admin, "?active=true")
+            .await
+            .0
+            .as_deref(),
+        Some("4")
+    );
+    assert_eq!(
+        total_and_len(&app, &admin, "?active=false")
+            .await
+            .0
+            .as_deref(),
+        Some("1")
+    );
+}
+
+#[tokio::test]
+async fn the_admin_total_is_zero_not_missing_when_nothing_matches() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+
+    assert_eq!(total_and_len(&app, &admin, "").await, (Some("0".into()), 0));
+    assert_eq!(
+        total_and_len(&app, &admin, "?active=false").await,
+        (Some("0".into()), 0)
+    );
+
+    // Só há ativos: o filtro de inativos continua dando 0.
+    app.setup_product(&admin, "Mug", 10, 5).await;
+    assert_eq!(
+        total_and_len(&app, &admin, "?active=false").await,
+        (Some("0".into()), 0)
+    );
+    assert_eq!(
+        total_and_len(&app, &admin, "?active=true").await,
+        (Some("1".into()), 1)
+    );
+}
