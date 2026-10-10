@@ -13,20 +13,20 @@ use crate::error::AppError;
 use crate::executor::Executor;
 use crate::models::auth::{Authenticated, SignIn, SignUp, TokenPair};
 use crate::models::customer::{Customer, CustomerRecord, NewCustomer};
-use crate::models::id_to_string;
 use crate::models::session::NewSession;
 use crate::models::user::{NewUser, ROLE_ADMIN, ROLE_CUSTOMER};
+use crate::models::{id_to_string, validate_username};
 use crate::repositories::{customer as customer_repo, session as session_repo, user as user_repo};
 
-const EMAIL_IN_USE: &str = "An account with this email already exists";
+const USERNAME_IN_USE: &str = "An account with this username already exists";
 const MIN_PASSWORD_LEN: usize = 8;
 // Limite superior para ninguém mandar uma senha gigante só para gastar CPU no argon2.
 const MAX_PASSWORD_LEN: usize = 128;
 const SESSION_TTL_HOURS: i64 = 1;
 const REFRESH_TTL_DAYS: i64 = 15;
 
-fn normalize_email(email: &str) -> String {
-    email.trim().to_lowercase()
+fn normalize_username(username: &str) -> String {
+    username.trim().to_lowercase()
 }
 
 fn ensure_valid_password(password: &str) -> Result<(), AppError> {
@@ -97,17 +97,17 @@ async fn verify_password(password: String, hash: Option<String>) -> Result<bool,
 
 pub async fn sign_up(db: &Surreal<Any>, input: SignUp) -> Result<Customer, AppError> {
     ensure_valid_password(&input.password)?;
-    let email = normalize_email(&input.email);
+    let username = normalize_username(&input.username);
 
-    if user_repo::find_by_email(&Executor::Db(db), &email)
+    if user_repo::find_by_username(&Executor::Db(db), &username)
         .await?
         .is_some()
     {
-        return Err(AppError::Conflict(EMAIL_IN_USE.to_string()));
+        return Err(AppError::Conflict(USERNAME_IN_USE.to_string()));
     }
 
     let user = NewUser {
-        email: email.clone(),
+        username: username.clone(),
         password_hash: hash_password(input.password).await?,
         role: ROLE_CUSTOMER.to_string(),
     };
@@ -133,7 +133,7 @@ pub async fn sign_up(db: &Surreal<Any>, input: SignUp) -> Result<Customer, AppEr
         }
     };
 
-    Ok(Customer::from_parts(customer, email))
+    Ok(Customer::from_parts(customer, username))
 }
 
 /// Cria o user e o customer com a mesma chave. Numa transação: ou ficam os dois, ou nenhum.
@@ -153,7 +153,7 @@ async fn sign_up_in_tx(
 
 pub async fn sign_in(db: &Surreal<Any>, input: SignIn) -> Result<TokenPair, AppError> {
     let ex = Executor::Db(db);
-    let user = user_repo::find_by_email(&ex, &normalize_email(&input.email)).await?;
+    let user = user_repo::find_by_username(&ex, &normalize_username(&input.username)).await?;
 
     let valid = verify_password(
         input.password,
@@ -261,19 +261,21 @@ pub async fn authenticate(db: &Surreal<Any>, token: &str) -> Result<Authenticate
     })
 }
 
-/// Garante que existe um admin com este e-mail (seed da partida). Idempotente: se o
-/// e-mail já existe, não troca a senha nem promove um usuário comum em silêncio.
+/// Garante que existe um admin com este username (seed da partida). Idempotente: se o
+/// username já existe, não troca a senha nem promove um usuário comum em silêncio.
 pub async fn ensure_admin(
     db: &Surreal<Any>,
-    email: &str,
+    username: &str,
     password: String,
 ) -> Result<(), AppError> {
     let ex = Executor::Db(db);
-    let email = normalize_email(email);
+    let username = normalize_username(username);
+    validate_username(&username)
+        .map_err(|_| AppError::Validation("ADMIN_USERNAME is not a valid username".to_string()))?;
 
-    if let Some(existing) = user_repo::find_by_email(&ex, &email).await? {
+    if let Some(existing) = user_repo::find_by_username(&ex, &username).await? {
         if existing.role != ROLE_ADMIN {
-            eprintln!("ADMIN_EMAIL belongs to a regular user: it was NOT promoted to admin");
+            eprintln!("ADMIN_USERNAME belongs to a regular user: it was NOT promoted to admin");
         }
         return Ok(());
     }
@@ -282,7 +284,7 @@ pub async fn ensure_admin(
     user_repo::create(
         &ex,
         NewUser {
-            email,
+            username,
             password_hash: hash_password(password).await?,
             role: ROLE_ADMIN.to_string(),
         },

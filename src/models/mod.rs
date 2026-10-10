@@ -19,6 +19,19 @@ pub fn validate_not_blank(value: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
+/// 3 to 32 characters: letters, numbers, dot, hyphen and underscore (no spaces or `@`).
+/// Uppercase is accepted; the service normalizes to lowercase.
+pub fn validate_username(value: &str) -> Result<(), ValidationError> {
+    let len = value.chars().count();
+    let allowed = value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
+    if !(3..=32).contains(&len) || !allowed {
+        return Err(ValidationError::new("username"));
+    }
+    Ok(())
+}
+
 /// A birth date in the future makes no sense.
 pub fn validate_not_future(date: &chrono::NaiveDate) -> Result<(), ValidationError> {
     if *date > chrono::Utc::now().date_naive() {

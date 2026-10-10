@@ -7,15 +7,15 @@ pub async fn find_by_id(ex: &Executor<'_>, id: &str) -> surrealdb::Result<Option
     ex.select_one(RecordId::new("user", id.to_string())).await
 }
 
-pub async fn find_by_email(
+pub async fn find_by_username(
     ex: &Executor<'_>,
-    email: &str,
+    username: &str,
 ) -> surrealdb::Result<Option<UserRecord>> {
     let rows: Vec<UserRecord> = ex
         .query_all(
-            "SELECT * FROM user WHERE email = $email LIMIT 1",
-            "email",
-            email.to_string(),
+            "SELECT * FROM user WHERE username = $username LIMIT 1",
+            "username",
+            username.to_string(),
         )
         .await?;
     Ok(rows.into_iter().next())

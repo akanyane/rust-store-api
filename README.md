@@ -23,10 +23,10 @@ O banco é criado em `data/rust-store` (ignorado pelo git) e o schema (`schema.s
 | Variável | Obrigatória | Descrição |
 |---|---|---|
 | `PORT` | não | Porta HTTP. Padrão `3000`. |
-| `ADMIN_EMAIL` | não* | E-mail do admin criado na partida. |
+| `ADMIN_USERNAME` | não* | Username do admin criado na partida. |
 | `ADMIN_PASSWORD` | não* | Senha do admin criado na partida. |
 
-\* Defina `ADMIN_EMAIL` e `ADMIN_PASSWORD` juntas, ou nenhuma das duas. Valor vazio conta como ausente e a loja sobe sem admin. A criação é idempotente: não troca a senha nem promove um usuário comum já existente.
+\* Defina `ADMIN_USERNAME` e `ADMIN_PASSWORD` juntas, ou nenhuma das duas. Valor vazio conta como ausente e a loja sobe sem admin. A criação é idempotente: não troca a senha nem promove um usuário comum já existente.
 
 ## Rotas
 
@@ -35,7 +35,7 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 | Método | Rota | Acesso | Descrição |
 |---|---|---|---|
 | GET | `/health` | pública | Health check |
-| POST | `/auth/sign-up` | pública | Cadastro de cliente |
+| POST | `/auth/sign-up` | pública | Cadastro de cliente (`username`, `password`, nomes e nascimento) |
 | POST | `/auth/sign-in` | pública | Login; devolve `session_token` e `refresh_token` |
 | POST | `/auth/sign-out` | pública | Encerra a sessão a partir do `refresh_token` |
 | POST | `/auth/refresh` | pública | Troca um `refresh_token` por um par novo de tokens |
@@ -60,6 +60,8 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 ## Autenticação
 
 Rotas protegidas esperam o cabeçalho `Authorization: Bearer <session_token>`.
+
+O login é por `username` e senha, sem e-mail. O `username` não diferencia maiúsculas de minúsculas (`Ana` e `ana` são o mesmo usuário) e é guardado em minúsculas.
 
 - A sessão dura 1 hora e o refresh token 15 dias.
 - `POST /auth/refresh` gira os tokens: o refresh token só vale uma vez, e a sessão antiga deixa de funcionar.
@@ -98,7 +100,7 @@ A loja opera em **unidades** (singular: *unidade*), sempre números inteiros e s
 
 ## Validação
 
-Os corpos JSON passam pelo extractor `ValidatedJson` (crate `validator`). Corpo malformado ou regra violada devolve `422` com `{"error": "campo: mensagem"}`, sem ecoar o valor enviado (LGPD). Regras: e-mail válido, nomes não vazios (máx. 100), preço e estoque não negativos, quantidade >= 1, data de nascimento fora do futuro, senha de 8 a 128 caracteres.
+Os corpos JSON passam pelo extractor `ValidatedJson` (crate `validator`). Corpo malformado ou regra violada devolve `422` com `{"error": "campo: mensagem"}`, sem ecoar o valor enviado (LGPD). Regras: username de 3 a 32 caracteres (letras, números, `.`, `-` e `_`), nomes não vazios (máx. 100), preço e estoque não negativos, quantidade >= 1, data de nascimento fora do futuro, senha de 8 a 128 caracteres.
 
 ## Testes
 

@@ -9,17 +9,17 @@ use crate::repositories::{
     session as session_repo, user as user_repo,
 };
 
-/// O e-mail mora no user de mesma chave. Cliente sem user é inconsistência de dados.
-async fn email_of(ex: &Executor<'_>, id: &str) -> Result<String, AppError> {
+/// O username mora no user de mesma chave. Cliente sem user é inconsistência de dados.
+async fn username_of(ex: &Executor<'_>, id: &str) -> Result<String, AppError> {
     user_repo::find_by_id(ex, id)
         .await?
-        .map(|user| user.email)
+        .map(|user| user.username)
         .ok_or_else(|| AppError::Internal("customer without an associated user".to_string()))
 }
 
 async fn to_customer(ex: &Executor<'_>, record: CustomerRecord) -> Result<Customer, AppError> {
-    let email = email_of(ex, &id_to_string(&record.id)).await?;
-    Ok(Customer::from_parts(record, email))
+    let username = username_of(ex, &id_to_string(&record.id)).await?;
+    Ok(Customer::from_parts(record, username))
 }
 
 pub async fn get_customer(db: &Surreal<Any>, id: &str) -> Result<Customer, AppError> {

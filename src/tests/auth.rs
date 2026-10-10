@@ -4,24 +4,70 @@ use serde_json::json;
 use super::{PASSWORD, TestApp, send};
 
 #[tokio::test]
-async fn sign_up_creates_customer_and_normalizes_email() {
+async fn sign_up_creates_customer_and_lowercases_the_username() {
     let app = TestApp::new().await;
 
-    let (status, body) = app.sign_up("Ana@Test.DEV").await;
+    let (status, body) = app.sign_up("Ana.Silva_1").await;
 
     assert_eq!(status, StatusCode::CREATED);
-    assert_eq!(body["email"], "ana@test.dev");
+    assert_eq!(body["username"], "ana.silva_1");
+    assert!(body.get("email").is_none());
 }
 
 #[tokio::test]
-async fn sign_up_with_existing_email_conflicts_without_echoing_it() {
+async fn usernames_are_unique_regardless_of_case() {
     let app = TestApp::new().await;
-    app.sign_up("ana@test.dev").await;
+    app.sign_up("ana").await;
 
-    let (status, body) = app.sign_up("ANA@test.dev").await;
+    let (status, body) = app.sign_up("ANA").await;
 
     assert_eq!(status, StatusCode::CONFLICT);
-    assert!(!body["error"].as_str().unwrap().contains("ana@test.dev"));
+    let message = body["error"].as_str().unwrap();
+    assert!(message.contains("username"), "{message}");
+    assert!(!message.contains("ANA"), "{message}");
+}
+
+#[tokio::test]
+async fn sign_in_ignores_the_case_of_the_username() {
+    let app = TestApp::new().await;
+    app.sign_up("Ana").await;
+
+    let (status, session, _) = app.sign_in("ANA", PASSWORD).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        app.send("GET", "/me", Some(&session), None).await.1["username"],
+        "ana"
+    );
+}
+
+#[tokio::test]
+async fn invalid_usernames_are_rejected() {
+    let app = TestApp::new().await;
+    let too_long = "a".repeat(33);
+
+    for bad in [
+        "ab",
+        "",
+        &too_long,
+        "ana smith",
+        "ana@test.dev",
+        "ana!",
+        "ána",
+    ] {
+        let (status, body) = app.sign_up(bad).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "username {bad:?}");
+        let message = body["error"].as_str().unwrap();
+        assert!(
+            message.contains("username: must be 3 to 32 characters"),
+            "{message}"
+        );
+    }
+
+    for good in ["abc", &"a".repeat(32), "ana.smith-1_x"] {
+        let (status, _) = app.sign_up(good).await;
+        assert_eq!(status, StatusCode::CREATED, "username {good:?}");
+    }
 }
 
 #[tokio::test]
@@ -34,7 +80,7 @@ async fn invalid_input_is_422_and_never_echoes_the_submitted_value() {
             "/auth/sign-up",
             None,
             Some(json!({
-                "email": "not-an-email",
+                "username": "not valid!",
                 "password": PASSWORD,
                 "first_name": "  ",
                 "last_name": "User",
@@ -45,7 +91,10 @@ async fn invalid_input_is_422_and_never_echoes_the_submitted_value() {
 
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     let message = body["error"].as_str().unwrap();
-    assert!(message.contains("email: invalid format"), "{message}");
+    assert!(
+        message.contains("username: must be 3 to 32 characters"),
+        "{message}"
+    );
     assert!(
         message.contains("first_name: must not be blank"),
         "{message}"
@@ -54,7 +103,7 @@ async fn invalid_input_is_422_and_never_echoes_the_submitted_value() {
         message.contains("birthday: must not be in the future"),
         "{message}"
     );
-    assert!(!message.contains("not-an-email"), "{message}");
+    assert!(!message.contains("not valid!"), "{message}");
 }
 
 #[tokio::test]
@@ -74,7 +123,7 @@ async fn malformed_or_incomplete_json_is_a_generic_422() {
             "POST",
             "/auth/sign-up",
             None,
-            Some(json!({ "email": "a@b.co" })),
+            Some(json!({ "username": "ana" })),
         )
         .await;
 
@@ -94,7 +143,7 @@ async fn short_password_is_rejected() {
             "/auth/sign-up",
             None,
             Some(json!({
-                "email": "ana@test.dev",
+                "username": "ana",
                 "password": "short",
                 "first_name": "Ana",
                 "last_name": "Silva",
@@ -109,27 +158,27 @@ async fn short_password_is_rejected() {
 #[tokio::test]
 async fn sign_in_failures_are_indistinguishable() {
     let app = TestApp::new().await;
-    app.sign_up("ana@test.dev").await;
+    app.sign_up("ana").await;
 
     let wrong_password = app
         .send(
             "POST",
             "/auth/sign-in",
             None,
-            Some(json!({ "email": "ana@test.dev", "password": "wrong-password" })),
+            Some(json!({ "username": "ana", "password": "wrong-password" })),
         )
         .await;
-    let unknown_email = app
+    let unknown_username = app
         .send(
             "POST",
             "/auth/sign-in",
             None,
-            Some(json!({ "email": "nobody@test.dev", "password": PASSWORD })),
+            Some(json!({ "username": "nobody", "password": PASSWORD })),
         )
         .await;
 
     assert_eq!(wrong_password.0, StatusCode::UNAUTHORIZED);
-    assert_eq!(wrong_password, unknown_email);
+    assert_eq!(wrong_password, unknown_username);
 }
 
 #[tokio::test]
@@ -146,7 +195,7 @@ async fn protected_routes_require_a_valid_token() {
 #[tokio::test]
 async fn customer_cannot_use_admin_routes() {
     let app = TestApp::new().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
 
     let (status, _) = app
         .send(
@@ -163,8 +212,8 @@ async fn customer_cannot_use_admin_routes() {
 #[tokio::test]
 async fn refresh_rotates_the_tokens_and_old_ones_stop_working() {
     let app = TestApp::new().await;
-    app.sign_up("ana@test.dev").await;
-    let (_, old_session, old_refresh) = app.sign_in("ana@test.dev", PASSWORD).await;
+    app.sign_up("ana").await;
+    let (_, old_session, old_refresh) = app.sign_in("ana", PASSWORD).await;
 
     let (status, body) = app
         .send(
@@ -229,8 +278,8 @@ async fn refresh_with_unknown_or_empty_token_is_rejected() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_refreshes_with_the_same_token_succeed_only_once() {
     let app = TestApp::new().await;
-    app.sign_up("ana@test.dev").await;
-    let (_, _, refresh) = app.sign_in("ana@test.dev", PASSWORD).await;
+    app.sign_up("ana").await;
+    let (_, _, refresh) = app.sign_in("ana", PASSWORD).await;
 
     let tasks: Vec<_> = (0..5)
         .map(|_| {
@@ -267,8 +316,8 @@ async fn concurrent_refreshes_with_the_same_token_succeed_only_once() {
 #[tokio::test]
 async fn sign_out_kills_the_whole_session() {
     let app = TestApp::new().await;
-    app.sign_up("ana@test.dev").await;
-    let (_, session, refresh) = app.sign_in("ana@test.dev", PASSWORD).await;
+    app.sign_up("ana").await;
+    let (_, session, refresh) = app.sign_in("ana", PASSWORD).await;
 
     let (status, _) = app
         .send(

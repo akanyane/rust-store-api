@@ -26,21 +26,23 @@ use surrealdb::{Surreal, engine::any::Any};
 #[cfg(test)]
 mod tests;
 
-/// Cria o admin a partir de ADMIN_EMAIL e ADMIN_PASSWORD (ambos ou nenhum).
+/// Cria o admin a partir de ADMIN_USERNAME e ADMIN_PASSWORD (ambos ou nenhum).
 /// Valor vazio conta como ausente, porque o `.env.example` traz as chaves vazias.
 async fn seed_admin(db: &Surreal<Any>) {
     let read = |key: &str| std::env::var(key).ok().filter(|value| !value.is_empty());
 
-    match (read("ADMIN_EMAIL"), read("ADMIN_PASSWORD")) {
-        (Some(email), Some(password)) => {
-            auth_service::ensure_admin(db, &email, password)
+    match (read("ADMIN_USERNAME"), read("ADMIN_PASSWORD")) {
+        (Some(username), Some(password)) => {
+            auth_service::ensure_admin(db, &username, password)
                 .await
                 .unwrap_or_else(|e| panic!("failed to prepare admin: {e:?}"));
         }
         (None, None) => {
-            println!("ADMIN_EMAIL and ADMIN_PASSWORD not set: starting the store without an admin")
+            println!(
+                "ADMIN_USERNAME and ADMIN_PASSWORD not set: starting the store without an admin"
+            )
         }
-        _ => panic!("set ADMIN_EMAIL and ADMIN_PASSWORD together, or neither"),
+        _ => panic!("set ADMIN_USERNAME and ADMIN_PASSWORD together, or neither"),
     }
 }
 

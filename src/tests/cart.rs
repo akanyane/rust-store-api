@@ -6,7 +6,7 @@ use super::TestApp;
 #[tokio::test]
 async fn empty_cart_for_a_customer_without_one() {
     let app = TestApp::new().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
 
     let (status, cart) = app.send("GET", "/cart", Some(&customer), None).await;
 
@@ -19,7 +19,7 @@ async fn empty_cart_for_a_customer_without_one() {
 async fn adding_the_same_variant_sums_the_quantity() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
     let item = app.setup_product(&admin, "Mug", 10, 10).await;
 
     assert_eq!(app.add_to_cart(&customer, &item, 2).await, StatusCode::OK);
@@ -38,7 +38,7 @@ async fn adding_the_same_variant_sums_the_quantity() {
 async fn quantity_must_be_at_least_one() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
     let item = app.setup_product(&admin, "Mug", 10, 10).await;
 
     assert_eq!(
@@ -66,7 +66,7 @@ async fn quantity_must_be_at_least_one() {
 async fn cannot_put_more_in_the_cart_than_the_stock() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
     let item = app.setup_product(&admin, "Mug", 10, 3).await;
 
     assert_eq!(
@@ -95,7 +95,7 @@ async fn cannot_put_more_in_the_cart_than_the_stock() {
 async fn inactive_product_or_variant_cannot_be_added() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
     let product_off = app.setup_product(&admin, "Cap", 10, 5).await;
     let variant_off = app.setup_product(&admin, "Mug", 10, 5).await;
 
@@ -131,8 +131,8 @@ async fn inactive_product_or_variant_cannot_be_added() {
 async fn each_customer_has_their_own_cart() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let ana = app.customer("ana@test.dev").await;
-    let bob = app.customer("bob@test.dev").await;
+    let ana = app.customer("ana").await;
+    let bob = app.customer("bob").await;
     let item = app.setup_product(&admin, "Mug", 10, 10).await;
 
     app.add_to_cart(&ana, &item, 2).await;
@@ -145,7 +145,7 @@ async fn each_customer_has_their_own_cart() {
 async fn removing_an_item_empties_the_cart_line() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
     let item = app.setup_product(&admin, "Mug", 10, 10).await;
     app.add_to_cart(&customer, &item, 2).await;
 

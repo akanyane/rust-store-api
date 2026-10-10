@@ -7,7 +7,7 @@ use super::{TestApp, send};
 async fn checkout_creates_the_order_decrements_stock_and_empties_the_cart() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
     let mug = app.setup_product(&admin, "Mug", 10, 5).await;
     let cap = app.setup_product(&admin, "Cap", 25, 4).await;
     app.add_to_cart(&customer, &mug, 2).await;
@@ -33,7 +33,7 @@ async fn checkout_creates_the_order_decrements_stock_and_empties_the_cart() {
 async fn order_keeps_the_price_and_name_from_the_time_of_purchase() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
     let mug = app.setup_product(&admin, "Mug", 10, 5).await;
     app.add_to_cart(&customer, &mug, 1).await;
     let (_, order) = app.send("POST", "/orders", Some(&customer), None).await;
@@ -60,7 +60,7 @@ async fn order_keeps_the_price_and_name_from_the_time_of_purchase() {
 #[tokio::test]
 async fn checkout_requires_authentication_and_a_non_empty_cart() {
     let app = TestApp::new().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
 
     assert_eq!(
         app.send("POST", "/orders", None, None).await.0,
@@ -76,7 +76,7 @@ async fn checkout_requires_authentication_and_a_non_empty_cart() {
 async fn checkout_is_all_or_nothing_when_an_item_runs_out_of_stock() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
 
     // Vários itens saudáveis e um que perde o estoque depois de entrar no carrinho.
     // A ordem de leitura do carrinho não é fixa: quando o item sem estoque vem por
@@ -121,7 +121,7 @@ async fn checkout_is_all_or_nothing_when_an_item_runs_out_of_stock() {
 async fn checkout_fails_while_the_cart_holds_a_deactivated_item() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
     let mug = app.setup_product(&admin, "Mug", 10, 5).await;
     let cap = app.setup_product(&admin, "Cap", 10, 5).await;
     app.add_to_cart(&customer, &mug, 1).await;
@@ -154,8 +154,8 @@ async fn checkout_fails_while_the_cart_holds_a_deactivated_item() {
 async fn orders_of_other_customers_look_nonexistent() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let ana = app.customer("ana@test.dev").await;
-    let bob = app.customer("bob@test.dev").await;
+    let ana = app.customer("ana").await;
+    let bob = app.customer("bob").await;
     let mug = app.setup_product(&admin, "Mug", 10, 5).await;
     app.add_to_cart(&ana, &mug, 1).await;
     let (_, order) = app.send("POST", "/orders", Some(&ana), None).await;
@@ -173,7 +173,7 @@ async fn orders_of_other_customers_look_nonexistent() {
 async fn cancel_returns_the_stock_and_cannot_be_repeated() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
     let mug = app.setup_product(&admin, "Mug", 10, 5).await;
     app.add_to_cart(&customer, &mug, 3).await;
     let (_, order) = app.send("POST", "/orders", Some(&customer), None).await;
@@ -200,7 +200,7 @@ async fn cancel_returns_the_stock_and_cannot_be_repeated() {
 async fn cancel_restores_stock_even_after_the_product_was_deactivated() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
     let mug = app.setup_product(&admin, "Mug", 10, 5).await;
     app.add_to_cart(&customer, &mug, 2).await;
     let (_, order) = app.send("POST", "/orders", Some(&customer), None).await;
@@ -229,8 +229,8 @@ async fn cancel_restores_stock_even_after_the_product_was_deactivated() {
 async fn cancel_requires_ownership_and_authentication() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let ana = app.customer("ana@test.dev").await;
-    let bob = app.customer("bob@test.dev").await;
+    let ana = app.customer("ana").await;
+    let bob = app.customer("bob").await;
     let mug = app.setup_product(&admin, "Mug", 10, 5).await;
     app.add_to_cart(&ana, &mug, 1).await;
     let (_, order) = app.send("POST", "/orders", Some(&ana), None).await;
@@ -261,7 +261,7 @@ async fn cancel_requires_ownership_and_authentication() {
 async fn race_to_buy(app: &TestApp, item: &super::Item, buyers: usize) -> Vec<StatusCode> {
     let mut tokens = Vec::new();
     for n in 0..buyers {
-        let token = app.customer(&format!("buyer{n}@test.dev")).await;
+        let token = app.customer(&format!("buyer{n}")).await;
         assert_eq!(app.add_to_cart(&token, item, 1).await, StatusCode::OK);
         tokens.push(token);
     }
@@ -316,7 +316,7 @@ async fn concurrent_checkouts_with_some_stock_left_let_exactly_that_many_through
 async fn concurrent_cancels_of_the_same_order_return_the_stock_only_once() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
     let item = app.setup_product(&admin, "Mug", 10, 5).await;
     app.add_to_cart(&customer, &item, 2).await;
     let (_, order) = app.send("POST", "/orders", Some(&customer), None).await;

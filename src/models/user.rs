@@ -7,7 +7,7 @@ pub const ROLE_ADMIN: &str = "admin";
 #[derive(Debug, Clone, SurrealValue)]
 pub struct UserRecord {
     pub id: RecordId,
-    pub email: String,
+    pub username: String,
     pub password_hash: String,
     pub role: String,
     pub created_at: Datetime,
@@ -15,7 +15,7 @@ pub struct UserRecord {
 
 #[derive(SurrealValue)]
 pub struct NewUser {
-    pub email: String,
+    pub username: String,
     pub password_hash: String,
     pub role: String,
 }

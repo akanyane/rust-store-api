@@ -14,11 +14,11 @@ DEFINE INDEX IF NOT EXISTS variant_sku_unique ON variant FIELDS sku UNIQUE;
 
 -- Identidade e login. O customer reaproveita a MESMA chave do user (user:abc <-> customer:abc).
 DEFINE TABLE IF NOT EXISTS user SCHEMAFULL;
-DEFINE FIELD IF NOT EXISTS email         ON user TYPE string ASSERT string::is_email($value);
+DEFINE FIELD IF NOT EXISTS username      ON user TYPE string;
 DEFINE FIELD IF NOT EXISTS password_hash ON user TYPE string;
 DEFINE FIELD IF NOT EXISTS created_at    ON user TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS role          ON user TYPE string DEFAULT 'customer' ASSERT $value IN ['customer', 'admin'];
-DEFINE INDEX IF NOT EXISTS user_email_unique ON user FIELDS email UNIQUE;
+DEFINE INDEX IF NOT EXISTS user_username_unique ON user FIELDS username UNIQUE;
 -- O DEFAULT não preenche linhas antigas; sem isto, quem já existia falharia na leitura.
 UPDATE user SET role = 'customer' WHERE role = NONE;
 

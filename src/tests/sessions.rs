@@ -6,8 +6,8 @@ use crate::services::auth as auth_service;
 #[tokio::test]
 async fn purge_removes_only_sessions_whose_refresh_token_expired() {
     let app = TestApp::new().await;
-    app.sign_up("ana@test.dev").await;
-    let (_, session, _) = app.sign_in("ana@test.dev", PASSWORD).await;
+    app.sign_up("ana").await;
+    let (_, session, _) = app.sign_in("ana", PASSWORD).await;
 
     // x1: refresh vencido (deve sumir). x3: só o session token venceu, o refresh
     // ainda vale (deve ficar, porque ainda dá para renovar).
@@ -45,8 +45,8 @@ async fn purge_removes_only_sessions_whose_refresh_token_expired() {
 #[tokio::test]
 async fn purge_with_nothing_expired_removes_nothing() {
     let app = TestApp::new().await;
-    app.sign_up("ana@test.dev").await;
-    app.sign_in("ana@test.dev", PASSWORD).await;
+    app.sign_up("ana").await;
+    app.sign_in("ana", PASSWORD).await;
 
     assert_eq!(
         auth_service::purge_expired_sessions(&app.db).await.unwrap(),

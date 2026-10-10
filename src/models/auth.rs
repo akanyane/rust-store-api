@@ -6,11 +6,11 @@ use validator::Validate;
 
 #[derive(Deserialize, Validate)]
 pub struct SignUp {
-    #[validate(
-        email(message = "invalid format"),
-        length(max = 254, message = "at most 254 characters")
-    )]
-    pub email: String,
+    #[validate(custom(
+        function = "crate::models::validate_username",
+        message = "must be 3 to 32 characters: letters, numbers, '.', '-' or '_'"
+    ))]
+    pub username: String,
     pub password: String,
     #[validate(
         custom(
@@ -37,8 +37,8 @@ pub struct SignUp {
 
 #[derive(Deserialize, Validate)]
 pub struct SignIn {
-    #[validate(length(max = 254, message = "at most 254 characters"))]
-    pub email: String,
+    #[validate(length(max = 32, message = "at most 32 characters"))]
+    pub username: String,
     #[validate(length(max = 128, message = "at most 128 characters"))]
     pub password: String,
 }

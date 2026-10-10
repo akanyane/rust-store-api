@@ -26,7 +26,7 @@ use crate::state::AppState;
 use crate::{build_router, db};
 
 pub const PASSWORD: &str = "password123";
-const ADMIN_EMAIL: &str = "admin@test.dev";
+const ADMIN_USERNAME: &str = "admin";
 const ADMIN_PASSWORD: &str = "supersecret1";
 
 pub struct TestApp {
@@ -109,13 +109,13 @@ impl TestApp {
         send(&self.router, method, uri, token, body).await
     }
 
-    pub async fn sign_up(&self, email: &str) -> (StatusCode, Value) {
+    pub async fn sign_up(&self, username: &str) -> (StatusCode, Value) {
         self.send(
             "POST",
             "/auth/sign-up",
             None,
             Some(json!({
-                "email": email,
+                "username": username,
                 "password": PASSWORD,
                 "first_name": "Test",
                 "last_name": "User",
@@ -126,13 +126,13 @@ impl TestApp {
     }
 
     /// Devolve `(session_token, refresh_token)`.
-    pub async fn sign_in(&self, email: &str, password: &str) -> (StatusCode, String, String) {
+    pub async fn sign_in(&self, username: &str, password: &str) -> (StatusCode, String, String) {
         let (status, body) = self
             .send(
                 "POST",
                 "/auth/sign-in",
                 None,
-                Some(json!({ "email": email, "password": password })),
+                Some(json!({ "username": username, "password": password })),
             )
             .await;
         let field = |name: &str| body[name].as_str().unwrap_or_default().to_string();
@@ -140,20 +140,20 @@ impl TestApp {
     }
 
     /// Cadastra e loga um cliente; devolve o session token.
-    pub async fn customer(&self, email: &str) -> String {
-        let (status, _) = self.sign_up(email).await;
-        assert_eq!(status, StatusCode::CREATED, "sign-up of {email}");
-        let (status, session, _) = self.sign_in(email, PASSWORD).await;
-        assert_eq!(status, StatusCode::OK, "sign-in of {email}");
+    pub async fn customer(&self, username: &str) -> String {
+        let (status, _) = self.sign_up(username).await;
+        assert_eq!(status, StatusCode::CREATED, "sign-up of {username}");
+        let (status, session, _) = self.sign_in(username, PASSWORD).await;
+        assert_eq!(status, StatusCode::OK, "sign-in of {username}");
         session
     }
 
     /// Cria o admin (o mesmo caminho do seed da partida) e devolve o session token.
     pub async fn admin(&self) -> String {
-        auth_service::ensure_admin(&self.db, ADMIN_EMAIL, ADMIN_PASSWORD.to_string())
+        auth_service::ensure_admin(&self.db, ADMIN_USERNAME, ADMIN_PASSWORD.to_string())
             .await
             .expect("ensure_admin");
-        let (status, session, _) = self.sign_in(ADMIN_EMAIL, ADMIN_PASSWORD).await;
+        let (status, session, _) = self.sign_in(ADMIN_USERNAME, ADMIN_PASSWORD).await;
         assert_eq!(status, StatusCode::OK, "admin sign-in");
         session
     }

@@ -50,7 +50,7 @@ async fn invalid_product_input_is_422_with_the_field_name() {
 async fn admin_routes_reject_missing_and_customer_tokens() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let customer = app.customer("ana@test.dev").await;
+    let customer = app.customer("ana").await;
     let item = app.setup_product(&admin, "Mug", 10, 5).await;
     let uri = format!("/products/{}", item.product_id);
     let body = json!({ "name": "x", "description": "x", "active": true });
