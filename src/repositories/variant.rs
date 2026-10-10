@@ -51,12 +51,15 @@ pub async fn decrement_stock(
     Ok(rows.into_iter().next())
 }
 
+/// Variantes do produto por nome e, em empate, por SKU (que é único, então a ordem é total).
+/// É o único ponto de leitura da lista, então a lista pública, o detalhe público e o detalhe
+/// de admin seguem a mesma ordem.
 pub async fn find_by_product(
     ex: &Executor<'_>,
     product: RecordId,
 ) -> surrealdb::Result<Vec<VariantRecord>> {
     ex.query_all(
-        "SELECT * FROM variant WHERE product = $product",
+        "SELECT * FROM variant WHERE product = $product ORDER BY name, sku",
         "product",
         product,
     )

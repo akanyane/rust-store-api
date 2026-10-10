@@ -135,7 +135,9 @@ Todo pedido traz `paid_at`: o instante em que ele virou `paid`, gravado pelo ban
 
 ## Ordem da listagem pública
 
-`GET /products` devolve todos os produtos ativos (sem paginação), por nome e, em empate, por id. Com `?sort=newest` vêm do mais recente para o mais antigo, e os produtos sem data de criação ficam no fim; `?sort=name` é o padrão. Valor desconhecido devolve `422`, e parâmetros que a rota não conhece são ignorados. A lista de variantes (`/products/{id}/variants` e o `variants` do detalhe) continua sem ordem definida.
+`GET /products` devolve todos os produtos ativos (sem paginação), por nome e, em empate, por id. Com `?sort=newest` vêm do mais recente para o mais antigo, e os produtos sem data de criação ficam no fim; `?sort=name` é o padrão. Valor desconhecido devolve `422`, e parâmetros que a rota não conhece são ignorados.
+
+As variantes (`GET /products/{id}/variants`, o `variants` do detalhe público e o do detalhe de admin) vêm por nome e, em empate, por SKU (que é único, então a ordem é sempre a mesma). Não há `sort` nem paginação para elas. A ordem de texto diferencia maiúsculas de minúsculas (`Zed` vem antes de `alpha`), como na ordenação de produtos.
 
 ## Data de criação do produto
 

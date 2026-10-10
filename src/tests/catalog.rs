@@ -377,3 +377,183 @@ async fn an_unknown_sort_is_422_but_other_parameters_are_ignored() {
     // Parâmetros que a rota não conhece (como os de campanha) continuam sendo ignorados.
     assert_eq!(public_names(&app, "?utm_source=newsletter").await, ["Mug"]);
 }
+
+/// Cria variantes do produto na ordem dada (nome, SKU) e devolve o id de cada uma.
+async fn add_variants(
+    app: &TestApp,
+    admin: &str,
+    product_id: &str,
+    variants: &[(&str, &str)],
+) -> Vec<String> {
+    let mut ids = Vec::new();
+    for (name, sku) in variants {
+        let (status, created) = app
+            .send(
+                "POST",
+                &format!("/products/{product_id}/variants"),
+                Some(admin),
+                Some(json!({ "name": name, "sku": sku, "price": 10, "stock": 5 })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{name}");
+        ids.push(created["id"].as_str().unwrap().to_string());
+    }
+    ids
+}
+
+fn skus(list: &serde_json::Value) -> Vec<String> {
+    list.as_array()
+        .unwrap()
+        .iter()
+        .map(|variant| variant["sku"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn variants_are_listed_by_name_then_sku_whatever_the_creation_order() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    // Seis variantes fora de ordem (mais a "Default" do produto), para a ordem do banco
+    // dificilmente coincidir por acaso. Os SKUs não seguem a ordem dos nomes.
+    add_variants(
+        &app,
+        &admin,
+        &mug.product_id,
+        &[
+            ("Red", "S-1"),
+            ("Blue", "S-6"),
+            ("Zed", "S-2"),
+            ("Alpha", "S-5"),
+            ("Green", "S-3"),
+            ("Black", "S-4"),
+        ],
+    )
+    .await;
+    let list_uri = format!("/products/{}/variants", mug.product_id);
+    let expected_names = ["Alpha", "Black", "Blue", "Default", "Green", "Red", "Zed"];
+
+    let (_, list) = app.send("GET", &list_uri, None, None).await;
+    let (_, again) = app.send("GET", &list_uri, None, None).await;
+    let (_, public_detail) = app
+        .send("GET", &format!("/products/{}", mug.product_id), None, None)
+        .await;
+    let (_, admin_detail) = app
+        .send(
+            "GET",
+            &format!("/admin/products/{}", mug.product_id),
+            Some(&admin),
+            None,
+        )
+        .await;
+
+    let names_of = |variants: &serde_json::Value| -> Vec<String> {
+        variants
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(names_of(&list), expected_names);
+    assert_eq!(list, again, "the order must not change between calls");
+    assert_eq!(names_of(&public_detail["variants"]), expected_names);
+    assert_eq!(names_of(&admin_detail["variants"]), expected_names);
+    assert_eq!(
+        public_detail["variants"], list,
+        "detail and list must agree"
+    );
+}
+
+#[tokio::test]
+async fn variants_with_the_same_name_are_ordered_by_sku() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    add_variants(
+        &app,
+        &admin,
+        &mug.product_id,
+        &[
+            ("Same", "S-4"),
+            ("Same", "S-1"),
+            ("Same", "S-6"),
+            ("Same", "S-3"),
+            ("Same", "S-5"),
+            ("Same", "S-2"),
+        ],
+    )
+    .await;
+
+    let (_, list) = app
+        .send(
+            "GET",
+            &format!("/products/{}/variants", mug.product_id),
+            None,
+            None,
+        )
+        .await;
+
+    let same: Vec<String> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|v| v["name"] == "Same")
+        .map(|v| v["sku"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(same, ["S-1", "S-2", "S-3", "S-4", "S-5", "S-6"]);
+    assert_eq!(skus(&list).len(), 7);
+}
+
+#[tokio::test]
+async fn the_admin_detail_keeps_the_same_order_and_adds_the_inactive_variants() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    let ids = add_variants(
+        &app,
+        &admin,
+        &mug.product_id,
+        &[("Zed", "S-1"), ("Alpha", "S-2"), ("Mid", "S-3")],
+    )
+    .await;
+    // Desativa a "Alpha": some do público, continua no admin, na mesma posição relativa.
+    app.send(
+        "DELETE",
+        &format!("/products/{}/variants/{}", mug.product_id, ids[1]),
+        Some(&admin),
+        None,
+    )
+    .await;
+
+    let (_, public) = app
+        .send(
+            "GET",
+            &format!("/products/{}/variants", mug.product_id),
+            None,
+            None,
+        )
+        .await;
+    let (_, admin_detail) = app
+        .send(
+            "GET",
+            &format!("/admin/products/{}", mug.product_id),
+            Some(&admin),
+            None,
+        )
+        .await;
+
+    let names = |v: &serde_json::Value| -> Vec<String> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(names(&public), ["Default", "Mid", "Zed"]);
+    assert_eq!(
+        names(&admin_detail["variants"]),
+        ["Alpha", "Default", "Mid", "Zed"]
+    );
+    assert_eq!(admin_detail["variants"][0]["active"], false);
+}
