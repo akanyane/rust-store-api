@@ -566,7 +566,7 @@ async fn paying_and_cancelling_at_the_same_time_leaves_exactly_one_outcome() {
     }
 }
 
-fn parse_time(value: &serde_json::Value) -> chrono::DateTime<chrono::Utc> {
+pub(super) fn parse_time(value: &serde_json::Value) -> chrono::DateTime<chrono::Utc> {
     chrono::DateTime::parse_from_rfc3339(value.as_str().expect("timestamp string"))
         .expect("rfc3339 timestamp")
         .with_timezone(&chrono::Utc)

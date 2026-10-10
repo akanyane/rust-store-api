@@ -329,3 +329,180 @@ async fn an_admin_can_reactivate_using_only_what_the_admin_routes_reveal() {
         .await;
     assert!(none_left.as_array().unwrap().is_empty());
 }
+
+fn created_at_of(product: &Value) -> Value {
+    product["created_at"].clone()
+}
+
+#[tokio::test]
+async fn a_new_product_records_when_it_was_created() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let before = chrono::Utc::now();
+
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    let after = chrono::Utc::now();
+
+    let (_, admin_view) = app
+        .send(
+            "GET",
+            &format!("/admin/products/{}", mug.product_id),
+            Some(&admin),
+            None,
+        )
+        .await;
+    let created_at = super::orders::parse_time(&admin_view["created_at"]);
+    assert!(created_at >= before && created_at <= after, "{created_at}");
+
+    // O mesmo valor aparece no detalhe público e nas duas listagens.
+    let (_, public_detail) = app
+        .send("GET", &format!("/products/{}", mug.product_id), None, None)
+        .await;
+    let (_, public_list) = app.send("GET", "/products", None, None).await;
+    let (_, admin_list) = app.send("GET", "/admin/products", Some(&admin), None).await;
+    assert_eq!(created_at_of(&public_detail), admin_view["created_at"]);
+    assert_eq!(created_at_of(&public_list[0]), admin_view["created_at"]);
+    assert_eq!(created_at_of(&admin_list[0]), admin_view["created_at"]);
+}
+
+#[tokio::test]
+async fn created_at_survives_edits_deactivation_and_reactivation() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    let detail_uri = format!("/admin/products/{}", mug.product_id);
+    let product_uri = format!("/products/{}", mug.product_id);
+    let (_, original) = app.send("GET", &detail_uri, Some(&admin), None).await;
+    assert!(original["created_at"].is_string());
+
+    let put = |name: &'static str, active: bool| json!({ "name": name, "description": "edited", "active": active });
+    let (status, edited) = app
+        .send(
+            "PUT",
+            &product_uri,
+            Some(&admin),
+            Some(put("Big Mug", true)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(edited["created_at"], original["created_at"], "after PUT");
+    assert_eq!(edited["name"], "Big Mug");
+    assert_eq!(edited["description"], "edited");
+
+    deactivate_product(&app, &admin, &mug).await;
+    let (_, inactive) = app.send("GET", &detail_uri, Some(&admin), None).await;
+    assert_eq!(
+        inactive["created_at"], original["created_at"],
+        "after DELETE"
+    );
+    assert_eq!(
+        inactive["name"], "Big Mug",
+        "DELETE must keep the edited fields"
+    );
+
+    let (_, reactivated) = app
+        .send(
+            "PUT",
+            &product_uri,
+            Some(&admin),
+            Some(put("Big Mug", true)),
+        )
+        .await;
+    assert_eq!(
+        reactivated["created_at"], original["created_at"],
+        "after reactivation"
+    );
+    assert_eq!(reactivated["active"], true);
+}
+
+#[tokio::test]
+async fn sort_newest_lists_the_most_recent_first_and_paginates() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    // Criados nesta ordem: a ordem por data é Charlie, Alpha, Bravo; por nome é outra.
+    for name in ["Bravo", "Alpha", "Charlie"] {
+        app.setup_product(&admin, name, 10, 5).await;
+    }
+    let list = |query: &'static str| {
+        let app = &app;
+        let admin = admin.clone();
+        async move {
+            let (status, body) = app
+                .send(
+                    "GET",
+                    &format!("/admin/products?{query}"),
+                    Some(&admin),
+                    None,
+                )
+                .await;
+            assert_eq!(status, StatusCode::OK, "{query}");
+            names(&body)
+        }
+    };
+
+    assert_eq!(list("sort=newest").await, ["Charlie", "Alpha", "Bravo"]);
+    assert_eq!(
+        list("sort=newest&limit=2&offset=1").await,
+        ["Alpha", "Bravo"]
+    );
+    // O padrão continua sendo por nome.
+    assert_eq!(list("sort=name").await, ["Alpha", "Bravo", "Charlie"]);
+    assert_eq!(list("limit=3").await, ["Alpha", "Bravo", "Charlie"]);
+}
+
+#[tokio::test]
+async fn products_without_a_creation_date_come_last_and_never_get_one() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    // Produto "antigo": gravado direto no banco, sem `created_at`, como os criados antes
+    // do campo existir.
+    app.db
+        .query("CREATE product SET name = 'Legacy', description = 'old', active = true")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    app.setup_product(&admin, "Newer", 10, 5).await;
+
+    let (_, list) = app
+        .send("GET", "/admin/products?sort=newest", Some(&admin), None)
+        .await;
+    assert_eq!(names(&list), ["Newer", "Legacy"]);
+    assert!(list[0]["created_at"].is_string());
+    assert!(list[1]["created_at"].is_null());
+    let legacy_id = list[1]["id"].as_str().unwrap().to_string();
+
+    // Editar, desativar e reativar não carimba uma data que nunca existiu.
+    let uri = format!("/products/{legacy_id}");
+    let put = json!({ "name": "Legacy", "description": "edited", "active": true });
+    let (status, edited) = app.send("PUT", &uri, Some(&admin), Some(put.clone())).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        edited["created_at"].is_null(),
+        "PUT invented a date: {edited}"
+    );
+    app.send("DELETE", &uri, Some(&admin), None).await;
+    let (_, after) = app.send("PUT", &uri, Some(&admin), Some(put)).await;
+    assert!(after["created_at"].is_null());
+    let (_, public) = app.send("GET", &uri, None, None).await;
+    assert!(public["created_at"].is_null());
+}
+
+#[tokio::test]
+async fn an_unknown_sort_is_422() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+
+    for query in ["sort=oldest", "sort=NAME", "sort="] {
+        let (status, body) = app
+            .send(
+                "GET",
+                &format!("/admin/products?{query}"),
+                Some(&admin),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{query}");
+        assert_eq!(body["error"], "Invalid query parameters", "{query}");
+    }
+}

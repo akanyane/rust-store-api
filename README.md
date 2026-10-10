@@ -48,7 +48,7 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 | DELETE | `/products/{id}` | admin | Desativa o produto (exclusão lógica) |
 | PUT | `/products/{id}/variants/{variant_id}` | admin | Substitui nome, SKU, preço, estoque e `active` da variante |
 | DELETE | `/products/{id}/variants/{variant_id}` | admin | Desativa a variante (exclusão lógica) |
-| GET | `/admin/products` | admin | Lista produtos ativos e inativos (`?active=`, `?limit=`, `?offset=`) |
+| GET | `/admin/products` | admin | Lista produtos ativos e inativos (`?active=`, `?sort=`, `?limit=`, `?offset=`) |
 | GET | `/admin/products/{id}` | admin | Detalha o produto (mesmo inativo) com todas as variantes, inclusive as inativas |
 | GET, PUT, DELETE | `/me` | cliente | Consulta, atualiza e remove o próprio cadastro |
 | GET | `/cart` | cliente | Consulta o carrinho |
@@ -86,7 +86,7 @@ O `total` continua somando todos os itens, disponíveis ou não, e nenhum item �
 
 ## Exclusão lógica
 
-`DELETE` em produto ou variante não apaga o registro: marca `active = false`, porque pedidos e carrinhos apontam para eles. Itens inativos somem do catálogo público (`GET /products`, `/products/{id}`, `/products/{id}/variants`) e não entram no carrinho nem no checkout. Para reativar, use o `PUT` com `"active": true`; os ids de quem foi desativado se descobrem em `GET /admin/products?active=false` (produtos) e `GET /admin/products/{id}` (variantes, com o `active` de cada uma). A listagem de admin vem ordenada por nome (e id, em empate) e aceita `limit` (1 a 200, padrão 50) e `offset`; parâmetros inválidos devolvem `422`. A listagem pública não tem ordem definida. O `stock` do `PUT` é um valor absoluto: um checkout simultâneo pode ser sobrescrito.
+`DELETE` em produto ou variante não apaga o registro: marca `active = false`, porque pedidos e carrinhos apontam para eles. Itens inativos somem do catálogo público (`GET /products`, `/products/{id}`, `/products/{id}/variants`) e não entram no carrinho nem no checkout. Para reativar, use o `PUT` com `"active": true`; os ids de quem foi desativado se descobrem em `GET /admin/products?active=false` (produtos) e `GET /admin/products/{id}` (variantes, com o `active` de cada uma). A listagem de admin vem ordenada por nome (e id, em empate) e aceita `sort=name` (padrão) ou `sort=newest` (do mais recente para o mais antigo), `limit` (1 a 200, padrão 50) e `offset`; parâmetros inválidos devolvem `422`. A listagem pública não tem ordem definida. O `stock` do `PUT` é um valor absoluto: um checkout simultâneo pode ser sobrescrito.
 
 ## Checkout
 
@@ -132,6 +132,10 @@ O pagamento é simulado: `POST /orders/{id}/pay` só troca o status de `pending`
 ## Data do pagamento
 
 Todo pedido traz `paid_at`: o instante em que ele virou `paid`, gravado pelo banco no mesmo comando que troca o status (tanto no `POST /orders/{id}/pay` quanto no `PUT /admin/orders/{id}/status`). É `null` enquanto o pedido não foi pago e em pedido cancelado. Enviar e entregar não alteram a data. Pedidos pagos **antes** do campo existir ficam com `paid_at: null`, porque a data real não foi guardada e não é inventada.
+
+## Data de criação do produto
+
+Todo produto traz `created_at`, gravado pela aplicação quando ele é criado e que nunca muda depois (editar, desativar e reativar preservam a data). Produtos criados **antes** do campo existir ficam com `created_at: null`, porque a data real não foi guardada e não é inventada; em `?sort=newest` eles aparecem no fim.
 
 ## Pedidos no admin
 

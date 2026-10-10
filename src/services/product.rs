@@ -1,4 +1,5 @@
-use surrealdb::{Surreal, engine::any::Any};
+use chrono::Utc;
+use surrealdb::{Surreal, engine::any::Any, types::Datetime};
 
 use crate::error::AppError;
 use crate::executor::Executor;
@@ -62,7 +63,8 @@ pub async fn admin_list_products(
         limit: query.limit.unwrap_or(DEFAULT_PAGE_SIZE),
         offset: query.offset.unwrap_or(0),
     };
-    let records = product_repo::find_page(&Executor::Db(db), page).await?;
+    let sort = query.sort.unwrap_or_default();
+    let records = product_repo::find_page(&Executor::Db(db), page, sort).await?;
     Ok(records.into_iter().map(Product::from).collect())
 }
 
@@ -100,6 +102,7 @@ async fn insert_product_with_default_variant(
     let new_product = NewProduct {
         name: input.name,
         description: input.description,
+        created_at: Datetime::from(Utc::now()),
     };
 
     let product = product_repo::create(ex, new_product)

@@ -2,6 +2,9 @@ DEFINE TABLE IF NOT EXISTS product SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name        ON product TYPE string;
 DEFINE FIELD IF NOT EXISTS description ON product TYPE string;
 DEFINE FIELD IF NOT EXISTS active      ON product TYPE bool DEFAULT true;
+-- Gravado pela aplicação na criação. NONE em produtos criados antes deste campo existir.
+-- Sem DEFAULT de propósito: ele poderia carimbar produtos antigos na primeira edição.
+DEFINE FIELD IF NOT EXISTS created_at  ON product TYPE option<datetime>;
 
 DEFINE TABLE IF NOT EXISTS variant SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS product     ON variant TYPE record<product>;

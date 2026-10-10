@@ -1,5 +1,6 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use surrealdb::types::{RecordId, SurrealValue};
+use surrealdb::types::{Datetime, RecordId, SurrealValue};
 use validator::Validate;
 
 use super::id_to_string;
@@ -11,6 +12,7 @@ pub struct ProductRecord {
     pub name: String,
     pub description: String,
     pub active: bool,
+    pub created_at: Option<Datetime>,
 }
 
 #[derive(Debug, Serialize)]
@@ -19,6 +21,7 @@ pub struct Product {
     pub name: String,
     pub description: String,
     pub active: bool,
+    pub created_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -27,6 +30,7 @@ pub struct ProductDetail {
     pub name: String,
     pub description: String,
     pub active: bool,
+    pub created_at: Option<DateTime<Utc>>,
     pub variants: Vec<Variant>,
 }
 
@@ -37,6 +41,7 @@ impl ProductDetail {
             name: product.name,
             description: product.description,
             active: product.active,
+            created_at: product.created_at,
             variants,
         }
     }
@@ -64,6 +69,7 @@ pub struct CreateProduct {
 pub struct NewProduct {
     pub name: String,
     pub description: String,
+    pub created_at: Datetime,
 }
 
 impl From<ProductRecord> for Product {
@@ -73,6 +79,7 @@ impl From<ProductRecord> for Product {
             name: record.name,
             description: record.description,
             active: record.active,
+            created_at: record.created_at.map(DateTime::<Utc>::from),
         }
     }
 }
@@ -100,9 +107,20 @@ pub struct ProductChanges {
     pub active: bool,
 }
 
+/// Ordem da listagem de admin: `name` (padrão) ou `newest` (mais recentes primeiro; os
+/// produtos sem data de criação ficam no fim).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProductSort {
+    #[default]
+    Name,
+    Newest,
+}
+
 #[derive(Debug, Deserialize, Validate)]
 pub struct ListProductsQuery {
     pub active: Option<bool>,
+    pub sort: Option<ProductSort>,
     #[validate(range(min = 1, max = 200, message = "must be between 1 and 200"))]
     pub limit: Option<i64>,
     #[validate(range(min = 0, message = "must not be negative"))]
