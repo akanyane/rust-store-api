@@ -51,3 +51,20 @@ pub async fn cancel_if_pending(
         .await?;
     Ok(rows.into_iter().next())
 }
+
+/// Marca como pago só se ainda estiver `pending`. Mesmo padrão do cancelamento: a
+/// checagem e a troca são um único comando, então só um dos concorrentes vence.
+/// Devolve `None` quando o pedido não estava pendente (nada foi alterado).
+pub async fn pay_if_pending(
+    ex: &Executor<'_>,
+    id: RecordId,
+) -> surrealdb::Result<Option<OrderRecord>> {
+    let rows: Vec<OrderRecord> = ex
+        .query_all(
+            "UPDATE $id SET status = 'paid' WHERE status = 'pending'",
+            "id",
+            id,
+        )
+        .await?;
+    Ok(rows.into_iter().next())
+}

@@ -43,3 +43,12 @@ pub async fn cancel_order(
     let order = order_service::cancel_order(&state.db, &customer_id, &order_id).await?;
     Ok(Json(order))
 }
+
+pub async fn pay_order(
+    State(state): State<AppState>,
+    AuthCustomer(customer_id): AuthCustomer,
+    Path(order_id): Path<String>,
+) -> Result<Json<OrderView>, AppError> {
+    let order = order_service::pay_order(&state.db, &customer_id, &order_id).await?;
+    Ok(Json(order))
+}

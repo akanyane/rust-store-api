@@ -312,3 +312,37 @@ async fn cancel_order_in_tx(
 
     build_view(cancelled, items)
 }
+
+/// Pagamento simulado: não há gateway, só a troca de `pending` para `paid`. O estoque já
+/// foi baixado no checkout, então não muda. Repete em caso de conflito de escrita (ver
+/// `retry_on_conflict`), por exemplo quando um cancelamento corre junto.
+pub async fn pay_order(
+    db: &Surreal<Any>,
+    customer_id: &str,
+    order_id: &str,
+) -> Result<OrderView, AppError> {
+    retry_on_conflict(|| pay_order_once(db, customer_id, order_id)).await
+}
+
+async fn pay_order_once(
+    db: &Surreal<Any>,
+    customer_id: &str,
+    order_id: &str,
+) -> Result<OrderView, AppError> {
+    let ex = Executor::Db(db);
+    let order = order_repo::find_by_id(&ex, order_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    // Pedido de outro cliente aparece como inexistente, para não revelar que existe.
+    if id_to_string(&order.customer) != customer_id {
+        return Err(AppError::NotFound);
+    }
+
+    let paid = order_repo::pay_if_pending(&ex, order.id.clone())
+        .await?
+        .ok_or_else(|| AppError::Conflict("Only pending orders can be paid".to_string()))?;
+
+    let items = order_item_repo::find_by_orders(&ex, vec![paid.id.clone()]).await?;
+    build_view(paid, items)
+}

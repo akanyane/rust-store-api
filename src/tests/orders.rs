@@ -344,3 +344,219 @@ async fn concurrent_cancels_of_the_same_order_return_the_stock_only_once() {
     assert_eq!(count(&statuses, StatusCode::CONFLICT), 4, "{statuses:?}");
     assert_eq!(app.stock(&item).await, 5, "{statuses:?}");
 }
+
+/// Cliente compra `quantity` unidades do item e devolve o id do pedido pendente.
+async fn place_order(app: &TestApp, token: &str, item: &super::Item, quantity: i64) -> String {
+    assert_eq!(app.add_to_cart(token, item, quantity).await, StatusCode::OK);
+    let (status, order) = app.send("POST", "/orders", Some(token), None).await;
+    assert_eq!(status, StatusCode::CREATED);
+    order["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn paying_marks_the_order_paid_and_leaves_the_stock_alone() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    let order_id = place_order(&app, &customer, &mug, 2).await;
+
+    let (status, order) = app
+        .send(
+            "POST",
+            &format!("/orders/{order_id}/pay"),
+            Some(&customer),
+            None,
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(order["status"], "paid");
+    assert_eq!(order["total"], 20);
+    assert_eq!(order["items"].as_array().unwrap().len(), 1);
+    assert_eq!(app.stock(&mug).await, 3);
+
+    let (_, listed) = app.send("GET", "/orders", Some(&customer), None).await;
+    assert_eq!(listed[0]["status"], "paid");
+}
+
+#[tokio::test]
+async fn only_pending_orders_can_be_paid() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    let paid_id = place_order(&app, &customer, &mug, 1).await;
+    let cancelled_id = place_order(&app, &customer, &mug, 1).await;
+    app.send(
+        "POST",
+        &format!("/orders/{cancelled_id}/cancel"),
+        Some(&customer),
+        None,
+    )
+    .await;
+    app.send(
+        "POST",
+        &format!("/orders/{paid_id}/pay"),
+        Some(&customer),
+        None,
+    )
+    .await;
+
+    let pay_again = app
+        .send(
+            "POST",
+            &format!("/orders/{paid_id}/pay"),
+            Some(&customer),
+            None,
+        )
+        .await;
+    let pay_cancelled = app
+        .send(
+            "POST",
+            &format!("/orders/{cancelled_id}/pay"),
+            Some(&customer),
+            None,
+        )
+        .await;
+
+    assert_eq!(pay_again.0, StatusCode::CONFLICT);
+    assert_eq!(pay_cancelled.0, StatusCode::CONFLICT);
+    assert_eq!(pay_cancelled.1["error"], "Only pending orders can be paid");
+    // O pedido cancelado continua cancelado, com o estoque devolvido.
+    let (_, order) = app
+        .send(
+            "GET",
+            &format!("/orders/{cancelled_id}"),
+            Some(&customer),
+            None,
+        )
+        .await;
+    assert_eq!(order["status"], "cancelled");
+    assert_eq!(app.stock(&mug).await, 4);
+}
+
+#[tokio::test]
+async fn a_paid_order_cannot_be_cancelled() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    let order_id = place_order(&app, &customer, &mug, 2).await;
+    app.send(
+        "POST",
+        &format!("/orders/{order_id}/pay"),
+        Some(&customer),
+        None,
+    )
+    .await;
+
+    let (status, _) = app
+        .send(
+            "POST",
+            &format!("/orders/{order_id}/cancel"),
+            Some(&customer),
+            None,
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::CONFLICT);
+    // Sem reembolso, o estoque do pedido pago não volta.
+    assert_eq!(app.stock(&mug).await, 3);
+    let (_, order) = app
+        .send("GET", &format!("/orders/{order_id}"), Some(&customer), None)
+        .await;
+    assert_eq!(order["status"], "paid");
+}
+
+#[tokio::test]
+async fn paying_requires_ownership_and_authentication() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let ana = app.customer("ana").await;
+    let bob = app.customer("bob").await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    let order_id = place_order(&app, &ana, &mug, 1).await;
+    let pay = format!("/orders/{order_id}/pay");
+
+    assert_eq!(
+        app.send("POST", &pay, None, None).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        app.send("POST", &pay, Some(&bob), None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        app.send("POST", "/orders/nope/pay", Some(&ana), None)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    // As tentativas inválidas não pagaram o pedido.
+    let (_, order) = app
+        .send("GET", &format!("/orders/{order_id}"), Some(&ana), None)
+        .await;
+    assert_eq!(order["status"], "pending");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_payments_of_the_same_order_succeed_only_once() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    let order_id = place_order(&app, &customer, &mug, 1).await;
+    let pay = format!("/orders/{order_id}/pay");
+
+    let tasks: Vec<_> = (0..5)
+        .map(|_| {
+            let router = app.router.clone();
+            let customer = customer.clone();
+            let pay = pay.clone();
+            tokio::spawn(async move { send(&router, "POST", &pay, Some(&customer), None).await.0 })
+        })
+        .collect();
+    let mut statuses = Vec::new();
+    for task in tasks {
+        statuses.push(task.await.unwrap());
+    }
+
+    assert_eq!(count(&statuses, StatusCode::OK), 1, "{statuses:?}");
+    assert_eq!(count(&statuses, StatusCode::CONFLICT), 4, "{statuses:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn paying_and_cancelling_at_the_same_time_leaves_exactly_one_outcome() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    let order_id = place_order(&app, &customer, &mug, 2).await;
+
+    let tasks: Vec<_> = ["pay", "cancel", "pay", "cancel"]
+        .into_iter()
+        .map(|action| {
+            let router = app.router.clone();
+            let customer = customer.clone();
+            let uri = format!("/orders/{order_id}/{action}");
+            tokio::spawn(async move { send(&router, "POST", &uri, Some(&customer), None).await.0 })
+        })
+        .collect();
+    let mut statuses = Vec::new();
+    for task in tasks {
+        statuses.push(task.await.unwrap());
+    }
+
+    assert_eq!(count(&statuses, StatusCode::OK), 1, "{statuses:?}");
+    assert_eq!(count(&statuses, StatusCode::CONFLICT), 3, "{statuses:?}");
+    // O estoque tem que bater com o status final: pago mantém baixado, cancelado devolve.
+    let (_, order) = app
+        .send("GET", &format!("/orders/{order_id}"), Some(&customer), None)
+        .await;
+    match order["status"].as_str().unwrap() {
+        "paid" => assert_eq!(app.stock(&mug).await, 3, "{statuses:?}"),
+        "cancelled" => assert_eq!(app.stock(&mug).await, 5, "{statuses:?}"),
+        other => panic!("unexpected status {other}"),
+    }
+}

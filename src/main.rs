@@ -107,6 +107,7 @@ fn build_router(state: AppState) -> Router {
         )
         .route("/orders/{id}", get(order_handlers::get_order))
         .route("/orders/{id}/cancel", post(order_handlers::cancel_order))
+        .route("/orders/{id}/pay", post(order_handlers::pay_order))
         .with_state(state)
 }
 

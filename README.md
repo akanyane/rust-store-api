@@ -56,6 +56,7 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 | POST | `/orders` | cliente | Checkout do carrinho |
 | GET | `/orders/{id}` | cliente | Detalha um pedido do cliente |
 | POST | `/orders/{id}/cancel` | cliente | Cancela um pedido pendente e devolve o estoque |
+| POST | `/orders/{id}/pay` | cliente | Pagamento simulado de um pedido pendente |
 
 ## Autenticação
 
@@ -108,8 +109,12 @@ Os corpos JSON passam pelo extractor `ValidatedJson` (crate `validator`). Corpo 
 cargo test
 ```
 
-Os testes sobem o app completo (rotas, services e schema) com um banco SurrealKV novo num diretório temporário e chamam o `Router` em memória, sem abrir porta. Não tocam em `data/rust-store`. Cobrem autenticação (inclusive refresh simultâneo), catálogo, carrinho, checkout (rollback e corrida pelo último item), cancelamento (inclusive simultâneo) e limpeza de sessões.
+Os testes sobem o app completo (rotas, services e schema) com um banco SurrealKV novo num diretório temporário e chamam o `Router` em memória, sem abrir porta. Não tocam em `data/rust-store`. Cobrem autenticação (inclusive refresh simultâneo), catálogo, carrinho, checkout (rollback e corrida pelo último item), cancelamento e pagamento (inclusive simultâneos) e limpeza de sessões.
+
+## Pagamento
+
+O pagamento é simulado: `POST /orders/{id}/pay` só troca o status de `pending` para `paid`, sem gateway nem dados de cartão. O estoque não muda (já foi baixado no checkout). Só pedido pendente paga; pedido `paid` ou `cancelled` devolve `409`. Não há reembolso, então um pedido pago **não pode ser cancelado**. Pagar e cancelar ao mesmo tempo tem um único vencedor.
 
 ## Limitações conhecidas
 
-Pagamento ainda não foi implementado.
+Não há gateway de pagamento real, reembolso, nem rotas de admin para pedidos (listar todos, mudar status).
