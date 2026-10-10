@@ -1,0 +1,237 @@
+use axum::http::StatusCode;
+use serde_json::json;
+
+use super::TestApp;
+
+#[tokio::test]
+async fn admin_creates_product_with_a_default_variant() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+
+    let item = app.setup_product(&admin, "Mug", 10, 5).await;
+
+    let (status, product) = app
+        .send("GET", &format!("/products/{}", item.product_id), None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(product["name"], "Mug");
+    let variants = product["variants"].as_array().unwrap();
+    assert_eq!(variants.len(), 1);
+    assert_eq!(variants[0]["price"], 10);
+    assert_eq!(variants[0]["stock"], 5);
+    assert!(variants[0]["sku"].as_str().unwrap().starts_with("SKU-"));
+
+    let (_, list) = app.send("GET", "/products", None, None).await;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn invalid_product_input_is_422_with_the_field_name() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+
+    let (status, body) = app
+        .send(
+            "POST",
+            "/products",
+            Some(&admin),
+            Some(json!({ "name": " ", "description": "d", "price": -1, "stock": -1 })),
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let message = body["error"].as_str().unwrap();
+    assert!(message.contains("name: must not be blank"), "{message}");
+    assert!(message.contains("price: must not be negative"), "{message}");
+    assert!(message.contains("stock: must not be negative"), "{message}");
+}
+
+#[tokio::test]
+async fn admin_routes_reject_missing_and_customer_tokens() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana@test.dev").await;
+    let item = app.setup_product(&admin, "Mug", 10, 5).await;
+    let uri = format!("/products/{}", item.product_id);
+    let body = json!({ "name": "x", "description": "x", "active": true });
+
+    assert_eq!(
+        app.send("PUT", &uri, None, Some(body.clone())).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        app.send("PUT", &uri, Some(&customer), Some(body)).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        app.send("DELETE", &uri, Some(&customer), None).await.0,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn put_product_replaces_the_fields() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let item = app.setup_product(&admin, "Mug", 10, 5).await;
+
+    let (status, body) = app
+        .send(
+            "PUT",
+            &format!("/products/{}", item.product_id),
+            Some(&admin),
+            Some(json!({ "name": "Big Mug", "description": "updated", "active": true })),
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["name"], "Big Mug");
+    assert_eq!(body["description"], "updated");
+
+    let missing = app
+        .send(
+            "PUT",
+            "/products/nope",
+            Some(&admin),
+            Some(json!({ "name": "x", "description": "x", "active": true })),
+        )
+        .await;
+    assert_eq!(missing.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn variant_sku_must_be_unique_but_can_be_kept_on_update() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    let cap = app.setup_product(&admin, "Cap", 20, 5).await;
+    let uri = format!("/products/{}/variants", mug.product_id);
+
+    let (status, created) = app
+        .send(
+            "POST",
+            &uri,
+            Some(&admin),
+            Some(json!({ "name": "Blue", "sku": "MUG-BLUE", "price": 12, "stock": 3 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let blue_id = created["id"].as_str().unwrap();
+
+    let duplicate = app
+        .send(
+            "POST",
+            &uri,
+            Some(&admin),
+            Some(json!({ "name": "Red", "sku": "MUG-BLUE", "price": 12, "stock": 3 })),
+        )
+        .await;
+    assert_eq!(duplicate.0, StatusCode::CONFLICT);
+
+    let keep_own = app
+        .send(
+            "PUT",
+            &format!("{uri}/{blue_id}"),
+            Some(&admin),
+            Some(json!({ "name": "Blue", "sku": "MUG-BLUE", "price": 15, "stock": 4, "active": true })),
+        )
+        .await;
+    assert_eq!(keep_own.0, StatusCode::OK);
+    assert_eq!(keep_own.1["price"], 15);
+    assert_eq!(keep_own.1["stock"], 4);
+
+    let cap_sku = format!("SKU-{}", cap.product_id);
+    let take_other = app
+        .send(
+            "PUT",
+            &format!("{uri}/{blue_id}"),
+            Some(&admin),
+            Some(
+                json!({ "name": "Blue", "sku": cap_sku, "price": 15, "stock": 4, "active": true }),
+            ),
+        )
+        .await;
+    assert_eq!(take_other.0, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn variant_of_another_product_is_not_found() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    let cap = app.setup_product(&admin, "Cap", 20, 5).await;
+
+    let uri = format!("/products/{}/variants/{}", mug.product_id, cap.variant_id);
+    let body = json!({ "name": "x", "sku": "Z", "price": 1, "stock": 1, "active": true });
+
+    assert_eq!(
+        app.send("PUT", &uri, Some(&admin), Some(body)).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        app.send("DELETE", &uri, Some(&admin), None).await.0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn deleting_a_product_is_logical_idempotent_and_reversible() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let item = app.setup_product(&admin, "Mug", 10, 5).await;
+    let uri = format!("/products/{}", item.product_id);
+
+    assert_eq!(
+        app.send("DELETE", &uri, Some(&admin), None).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        app.send("DELETE", &uri, Some(&admin), None).await.0,
+        StatusCode::NO_CONTENT
+    );
+
+    assert_eq!(
+        app.send("GET", &uri, None, None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    let (_, list) = app.send("GET", "/products", None, None).await;
+    assert!(list.as_array().unwrap().is_empty());
+    let variants = app
+        .send("GET", &format!("{uri}/variants"), None, None)
+        .await;
+    assert_eq!(variants.0, StatusCode::NOT_FOUND);
+    // O registro continua no banco (pedidos e carrinhos apontam para ele).
+    assert_eq!(app.stock(&item).await, 5);
+
+    let (status, _) = app
+        .send(
+            "PUT",
+            &uri,
+            Some(&admin),
+            Some(json!({ "name": "Mug", "description": "d", "active": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(app.send("GET", &uri, None, None).await.0, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn deleting_a_variant_hides_it_from_the_public_listing() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let item = app.setup_product(&admin, "Mug", 10, 5).await;
+    let uri = format!("/products/{}/variants", item.product_id);
+
+    let (status, _) = app
+        .send(
+            "DELETE",
+            &format!("{uri}/{}", item.variant_id),
+            Some(&admin),
+            None,
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, variants) = app.send("GET", &uri, None, None).await;
+    assert!(variants.as_array().unwrap().is_empty());
+}

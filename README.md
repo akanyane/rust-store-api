@@ -100,6 +100,16 @@ A loja opera em **unidades** (singular: *unidade*), sempre números inteiros e s
 
 Os corpos JSON passam pelo extractor `ValidatedJson` (crate `validator`). Corpo malformado ou regra violada devolve `422` com `{"error": "campo: mensagem"}`, sem ecoar o valor enviado (LGPD). Regras: e-mail válido, nomes não vazios (máx. 100), preço e estoque não negativos, quantidade >= 1, data de nascimento fora do futuro, senha de 8 a 128 caracteres.
 
+## Testes
+
+```bash
+cargo test
+```
+
+Os testes sobem o app completo (rotas, services e schema) com um banco SurrealKV novo num diretório temporário e chamam o `Router` em memória, sem abrir porta. Não tocam em `data/rust-store`. Cobrem autenticação (inclusive refresh simultâneo), catálogo, carrinho, checkout (rollback e corrida pelo último item), cancelamento e limpeza de sessões.
+
+Um teste está marcado com `#[ignore]` por documentar um bug conhecido: no checkout simultâneo, quem perde a corrida recebe `500` em vez de `409` (o estoque nunca é vendido a mais). Rode com `cargo test -- --ignored`.
+
 ## Limitações conhecidas
 
 Pagamento ainda não foi implementado.

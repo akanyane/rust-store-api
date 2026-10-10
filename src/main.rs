@@ -23,6 +23,9 @@ use services::auth as auth_service;
 use state::AppState;
 use surrealdb::{Surreal, engine::any::Any};
 
+#[cfg(test)]
+mod tests;
+
 /// Cria o admin a partir de ADMIN_EMAIL e ADMIN_PASSWORD (ambos ou nenhum).
 /// Valor vazio conta como ausente, porque o `.env.example` traz as chaves vazias.
 async fn seed_admin(db: &Surreal<Any>) {
@@ -59,22 +62,8 @@ fn spawn_session_cleanup(db: Surreal<Any>) {
     });
 }
 
-#[tokio::main]
-async fn main() {
-    // Em produção o .env pode não existir; nesse caso valem as variáveis do ambiente.
-    dotenvy::dotenv().ok();
-
-    let port: u16 = std::env::var("PORT")
-        .unwrap_or_else(|_| "3000".to_string())
-        .parse()
-        .expect("PORT must be a number between 0 and 65535");
-
-    let db = db::connect_db().await.unwrap();
-    seed_admin(&db).await;
-    spawn_session_cleanup(db.clone());
-    let state = AppState { db };
-
-    let app = Router::new()
+fn build_router(state: AppState) -> Router {
+    Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/auth/sign-up", post(auth_handlers::sign_up))
         .route("/auth/sign-in", post(auth_handlers::sign_in))
@@ -116,7 +105,25 @@ async fn main() {
         )
         .route("/orders/{id}", get(order_handlers::get_order))
         .route("/orders/{id}/cancel", post(order_handlers::cancel_order))
-        .with_state(state);
+        .with_state(state)
+}
+
+#[tokio::main]
+async fn main() {
+    // Em produção o .env pode não existir; nesse caso valem as variáveis do ambiente.
+    dotenvy::dotenv().ok();
+
+    let port: u16 = std::env::var("PORT")
+        .unwrap_or_else(|_| "3000".to_string())
+        .parse()
+        .expect("PORT must be a number between 0 and 65535");
+
+    let db = db::connect_db().await.unwrap();
+    seed_admin(&db).await;
+    spawn_session_cleanup(db.clone());
+    let state = AppState { db };
+
+    let app = build_router(state);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
