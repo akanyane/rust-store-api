@@ -13,6 +13,7 @@ pub struct OrderRecord {
     pub status: String,
     pub total: i64,
     pub created_at: Datetime,
+    pub paid_at: Option<Datetime>,
 }
 
 /// O `status` fica de fora: o schema grava `pending` por padrão.
@@ -49,6 +50,7 @@ pub struct OrderView {
     pub status: String,
     pub total: i64,
     pub created_at: DateTime<Utc>,
+    pub paid_at: Option<DateTime<Utc>>,
     pub items: Vec<OrderItemView>,
 }
 

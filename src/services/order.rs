@@ -65,6 +65,7 @@ fn build_view(order: OrderRecord, items: Vec<OrderItemRecord>) -> Result<OrderVi
         status: order.status,
         total: order.total,
         created_at: DateTime::<Utc>::from(order.created_at),
+        paid_at: order.paid_at.map(DateTime::<Utc>::from),
         items,
     })
 }

@@ -60,6 +60,8 @@ DEFINE FIELD IF NOT EXISTS customer    ON order TYPE record<customer>;
 DEFINE FIELD OVERWRITE status ON order TYPE string DEFAULT 'pending' ASSERT $value IN ['pending', 'paid', 'cancelled', 'shipped', 'delivered'];
 DEFINE FIELD IF NOT EXISTS total ON order TYPE int ASSERT $value >= 0;
 DEFINE FIELD IF NOT EXISTS created_at  ON order TYPE datetime DEFAULT time::now();
+-- Quando o pedido virou 'paid'. Fica NONE até o pagamento (e em pedidos pagos antes deste campo existir).
+DEFINE FIELD IF NOT EXISTS paid_at ON order TYPE option<datetime>;
 DEFINE INDEX IF NOT EXISTS order_customer ON order FIELDS customer;
 
 DEFINE TABLE IF NOT EXISTS order_item SCHEMAFULL;

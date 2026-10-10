@@ -61,7 +61,7 @@ pub async fn pay_if_pending(
 ) -> surrealdb::Result<Option<OrderRecord>> {
     let rows: Vec<OrderRecord> = ex
         .query_all(
-            "UPDATE $id SET status = 'paid' WHERE status = 'pending'",
+            "UPDATE $id SET status = 'paid', paid_at = time::now() WHERE status = 'pending'",
             "id",
             id,
         )
@@ -90,7 +90,9 @@ pub async fn change_status(
 ) -> surrealdb::Result<Option<OrderRecord>> {
     let rows: Vec<OrderRecord> = ex
         .query_all(
-            "UPDATE $change.id SET status = $change.to WHERE status = $change.from",
+            "UPDATE $change.id SET status = $change.to, \
+         paid_at = IF $change.to = 'paid' { time::now() } ELSE { paid_at } \
+         WHERE status = $change.from",
             "change",
             change,
         )

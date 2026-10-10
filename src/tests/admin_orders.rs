@@ -495,3 +495,53 @@ async fn change_status_only_applies_when_the_order_is_still_in_the_origin_status
         .unwrap();
     assert_eq!(right_origin.unwrap().status, "paid");
 }
+
+#[tokio::test]
+async fn admin_payment_records_paid_at_and_shipping_keeps_it() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    let order_id = place_order(&app, &customer, &mug, 1).await;
+    let uri = format!("/admin/orders/{order_id}");
+
+    let (_, before) = app.send("GET", &uri, Some(&admin), None).await;
+    assert!(before["paid_at"].is_null());
+
+    let (_, paid) = set_status(&app, &admin, &order_id, "paid").await;
+    let after_paying = chrono::Utc::now();
+    assert!(paid["paid_at"].is_string(), "{paid}");
+    let paid_at = chrono::DateTime::parse_from_rfc3339(paid["paid_at"].as_str().unwrap())
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    assert!(paid_at <= after_paying);
+
+    // Enviar e entregar não mexem na data do pagamento.
+    for next in ["shipped", "delivered"] {
+        let (status, order) = set_status(&app, &admin, &order_id, next).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(order["status"], next);
+        assert_eq!(
+            order["paid_at"], paid["paid_at"],
+            "paid_at changed on {next}"
+        );
+    }
+
+    // A listagem do admin traz o mesmo valor.
+    let (_, listed) = app.send("GET", "/admin/orders", Some(&admin), None).await;
+    assert_eq!(listed[0]["paid_at"], paid["paid_at"]);
+}
+
+#[tokio::test]
+async fn an_order_cancelled_by_the_admin_never_gets_a_paid_at() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    let order_id = place_order(&app, &customer, &mug, 1).await;
+
+    let (status, order) = set_status(&app, &admin, &order_id, "cancelled").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(order["paid_at"].is_null(), "{order}");
+}

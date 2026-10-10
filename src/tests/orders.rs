@@ -565,3 +565,78 @@ async fn paying_and_cancelling_at_the_same_time_leaves_exactly_one_outcome() {
         other => panic!("unexpected status {other}"),
     }
 }
+
+fn parse_time(value: &serde_json::Value) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_rfc3339(value.as_str().expect("timestamp string"))
+        .expect("rfc3339 timestamp")
+        .with_timezone(&chrono::Utc)
+}
+
+#[tokio::test]
+async fn customer_payment_records_when_the_order_was_paid() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    let paid_id = place_order(&app, &customer, &mug, 1).await;
+    let pending_id = place_order(&app, &customer, &mug, 1).await;
+    let cancelled_id = place_order(&app, &customer, &mug, 1).await;
+    app.send(
+        "POST",
+        &format!("/orders/{cancelled_id}/cancel"),
+        Some(&customer),
+        None,
+    )
+    .await;
+
+    let (_, pending) = app
+        .send(
+            "GET",
+            &format!("/orders/{pending_id}"),
+            Some(&customer),
+            None,
+        )
+        .await;
+    assert!(
+        pending["paid_at"].is_null(),
+        "unpaid order must have no paid_at"
+    );
+
+    let (status, paid) = app
+        .send(
+            "POST",
+            &format!("/orders/{paid_id}/pay"),
+            Some(&customer),
+            None,
+        )
+        .await;
+    let after = chrono::Utc::now();
+
+    assert_eq!(status, StatusCode::OK);
+    let paid_at = parse_time(&paid["paid_at"]);
+    assert!(
+        paid_at >= parse_time(&paid["created_at"]),
+        "paid_at before created_at"
+    );
+    assert!(paid_at <= after, "paid_at in the future");
+
+    // O mesmo valor aparece ao reler e na listagem; cancelado e pendente seguem sem data.
+    let (_, fetched) = app
+        .send("GET", &format!("/orders/{paid_id}"), Some(&customer), None)
+        .await;
+    assert_eq!(fetched["paid_at"], paid["paid_at"]);
+    let (_, listed) = app.send("GET", "/orders", Some(&customer), None).await;
+    for order in listed.as_array().unwrap() {
+        let expected_paid = order["id"] == paid_id;
+        assert_eq!(order["paid_at"].is_string(), expected_paid, "{order}");
+    }
+    let (_, cancelled) = app
+        .send(
+            "GET",
+            &format!("/orders/{cancelled_id}"),
+            Some(&customer),
+            None,
+        )
+        .await;
+    assert!(cancelled["paid_at"].is_null());
+}

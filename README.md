@@ -118,6 +118,10 @@ Os testes sobem o app completo (rotas, services e schema) com um banco SurrealKV
 
 O pagamento é simulado: `POST /orders/{id}/pay` só troca o status de `pending` para `paid`, sem gateway nem dados de cartão. O estoque não muda (já foi baixado no checkout). Só pedido pendente paga; pedido `paid` ou `cancelled` devolve `409`. Não há reembolso, então um pedido pago **não pode ser cancelado**. Pagar e cancelar ao mesmo tempo tem um único vencedor.
 
+## Data do pagamento
+
+Todo pedido traz `paid_at`: o instante em que ele virou `paid`, gravado pelo banco no mesmo comando que troca o status (tanto no `POST /orders/{id}/pay` quanto no `PUT /admin/orders/{id}/status`). É `null` enquanto o pedido não foi pago e em pedido cancelado. Enviar e entregar não alteram a data. Pedidos pagos **antes** do campo existir ficam com `paid_at: null`, porque a data real não foi guardada e não é inventada.
+
 ## Pedidos no admin
 
 Ciclo de status: `pending` → `paid` ou `cancelled`; `paid` → `shipped` → `delivered`. `cancelled` e `delivered` são finais. `PUT /admin/orders/{id}/status` recebe `{"status": "paid"}` e devolve `409` para qualquer transição fora do ciclo. Cancelar um pedido pendente devolve o estoque; pedido pago não cancela (sem reembolso). O cliente continua podendo pagar e cancelar o que é seu, mas só enquanto o pedido está `pending`.
