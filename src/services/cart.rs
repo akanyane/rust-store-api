@@ -4,9 +4,10 @@ use surrealdb::{Surreal, engine::any::Any, types::RecordId};
 
 use crate::error::AppError;
 use crate::executor::Executor;
-use crate::models::cart::{CartItemView, CartView, NewCart};
+use crate::models::cart::{CartItemView, CartView, NewCart, UnavailableReason};
 use crate::models::cart_item::{AddCartItem, NewCartItem, UpdateCartItem};
 use crate::models::id_to_string;
+use crate::models::product::ProductRecord;
 use crate::models::variant::VariantRecord;
 use crate::repositories::{
     cart as cart_repo, cart_item as cart_item_repo, customer as customer_repo,
@@ -22,6 +23,23 @@ fn ensure_valid_quantity(quantity: i32) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Por que este item não pode ser comprado agora, ou `None` se pode. São as mesmas regras
+/// do checkout (variante e produto ativos, estoque suficiente); a quantidade igual ao
+/// estoque ainda é válida.
+fn unavailable_reason(
+    variant: &VariantRecord,
+    product_active: bool,
+    quantity: i32,
+) -> Option<UnavailableReason> {
+    if !variant.active || !product_active {
+        return Some(UnavailableReason::Inactive);
+    }
+    if quantity > variant.stock {
+        return Some(UnavailableReason::InsufficientStock);
+    }
+    None
+}
+
 async fn ensure_purchasable(
     ex: &Executor<'_>,
     variant: &VariantRecord,
@@ -30,16 +48,17 @@ async fn ensure_purchasable(
     let product_active = product_repo::find_by_id(ex, &id_to_string(&variant.product))
         .await?
         .is_some_and(|product| product.active);
-    if !variant.active || !product_active {
-        return Err(AppError::Conflict("Variant unavailable".to_string()));
-    }
-    if quantity > variant.stock {
-        return Err(AppError::Conflict(format!(
+
+    match unavailable_reason(variant, product_active, quantity) {
+        Some(UnavailableReason::Inactive) => {
+            Err(AppError::Conflict("Variant unavailable".to_string()))
+        }
+        Some(UnavailableReason::InsufficientStock) => Err(AppError::Conflict(format!(
             "Insufficient stock: {} item(s) left",
             variant.stock
-        )));
+        ))),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 /// Confirma que o cliente existe e devolve o `RecordId` dele.
@@ -61,9 +80,20 @@ async fn build_view(ex: &Executor<'_>, cart: RecordId) -> Result<CartView, AppEr
         .map(|variant| (id_to_string(&variant.id), variant))
         .collect();
 
+    let product_ids = variants
+        .values()
+        .map(|variant| variant.product.clone())
+        .collect();
+    let products: HashMap<String, ProductRecord> = product_repo::find_by_ids(ex, product_ids)
+        .await?
+        .into_iter()
+        .map(|product| (id_to_string(&product.id), product))
+        .collect();
+
     let overflow = || AppError::Internal("overflow computing cart".to_string());
     let mut views = Vec::with_capacity(items.len());
     let mut total: i64 = 0;
+    let mut all_available = true;
 
     for item in items {
         let variant = variants
@@ -76,6 +106,12 @@ async fn build_view(ex: &Executor<'_>, cart: RecordId) -> Result<CartView, AppEr
             .ok_or_else(overflow)?;
         total = total.checked_add(line_total).ok_or_else(overflow)?;
 
+        let product_active = products
+            .get(&id_to_string(&variant.product))
+            .is_some_and(|product| product.active);
+        let reason = unavailable_reason(variant, product_active, item.quantity);
+        all_available &= reason.is_none();
+
         views.push(CartItemView {
             variant_id: id_to_string(&variant.id),
             product_id: id_to_string(&variant.product),
@@ -84,12 +120,16 @@ async fn build_view(ex: &Executor<'_>, cart: RecordId) -> Result<CartView, AppEr
             unit_price: variant.price,
             quantity: item.quantity,
             line_total,
+            available: reason.is_none(),
+            unavailable_reason: reason,
         });
     }
 
+    let can_checkout = !views.is_empty() && all_available;
     Ok(CartView {
         items: views,
         total,
+        can_checkout,
     })
 }
 

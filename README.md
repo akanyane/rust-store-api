@@ -73,6 +73,15 @@ O login é por `username` e senha, sem e-mail. O `username` não diferencia mai�
 - Senhas são guardadas com argon2; tokens, apenas como hash SHA-256.
 - O cliente é sempre identificado pelo token, nunca por um id na URL.
 
+## Itens indisponíveis no carrinho
+
+As respostas de carrinho (`GET /cart`, `POST /cart/items`, `PUT` e `DELETE /cart/items/{variant_id}`) sinalizam o que não pode ser comprado agora:
+
+- cada item traz `available` e `unavailable_reason`: `null` quando disponível, `"inactive"` se o produto ou a variante foi desativado, `"insufficient_stock"` se o estoque atual é menor que a quantidade (inclui estoque zero; quantidade igual ao estoque ainda é válida);
+- o carrinho traz `can_checkout`: `true` só se há itens e todos estão disponíveis.
+
+O `total` continua somando todos os itens, disponíveis ou não, e nenhum item é removido sozinho. É um retrato do momento: quem decide é o checkout, que segue recusando com `409` se algo mudou entre a leitura do carrinho e a compra.
+
 ## Exclusão lógica
 
 `DELETE` em produto ou variante não apaga o registro: marca `active = false`, porque pedidos e carrinhos apontam para eles. Itens inativos somem do catálogo público (`GET /products`, `/products/{id}`, `/products/{id}/variants`) e não entram no carrinho nem no checkout. Para reativar, use o `PUT` com `"active": true`. O `stock` do `PUT` é um valor absoluto: um checkout simultâneo pode ser sobrescrito.
@@ -112,7 +121,7 @@ Os corpos JSON passam pelo extractor `ValidatedJson` (crate `validator`). Corpo 
 cargo test
 ```
 
-Os testes sobem o app completo (rotas, services e schema) com um banco SurrealKV novo num diretório temporário e chamam o `Router` em memória, sem abrir porta. Não tocam em `data/rust-store`. Cobrem autenticação (inclusive refresh simultâneo), catálogo, carrinho, checkout (rollback e corrida pelo último item), cancelamento, pagamento e rotas de admin de pedidos (inclusive simultâneos) e limpeza de sessões.
+Os testes sobem o app completo (rotas, services e schema) com um banco SurrealKV novo num diretório temporário e chamam o `Router` em memória, sem abrir porta. Não tocam em `data/rust-store`. Cobrem autenticação (inclusive refresh simultâneo), catálogo, carrinho (inclusive itens indisponíveis), checkout (rollback e corrida pelo último item), cancelamento, pagamento e rotas de admin de pedidos (inclusive simultâneos) e limpeza de sessões.
 
 ## Pagamento
 
