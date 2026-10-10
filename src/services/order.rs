@@ -9,7 +9,8 @@ use crate::executor::Executor;
 use crate::models::cart_item::CartItemRecord;
 use crate::models::id_to_string;
 use crate::models::order::{
-    NewOrder, NewOrderItem, OrderItemRecord, OrderItemView, OrderRecord, OrderView,
+    AdminOrderView, DEFAULT_PAGE_SIZE, ListOrdersQuery, NewOrder, NewOrderItem, OrderItemRecord,
+    OrderItemView, OrderPage, OrderRecord, OrderStatus, OrderView, StatusChange,
 };
 use crate::models::product::ProductRecord;
 use crate::models::variant::VariantRecord;
@@ -210,10 +211,18 @@ pub async fn list_orders(db: &Surreal<Any>, customer_id: &str) -> Result<Vec<Ord
     let customer = RecordId::new("customer", customer_id.to_string());
 
     let orders = order_repo::find_by_customer(&ex, customer).await?;
+    views_for(&ex, orders).await
+}
+
+/// Monta a visão de cada pedido buscando os itens de todos de uma vez, na mesma ordem.
+async fn views_for(
+    ex: &Executor<'_>,
+    orders: Vec<OrderRecord>,
+) -> Result<Vec<OrderView>, AppError> {
     let order_ids = orders.iter().map(|order| order.id.clone()).collect();
 
     let mut items_by_order: HashMap<String, Vec<OrderItemRecord>> = HashMap::new();
-    for item in order_item_repo::find_by_orders(&ex, order_ids).await? {
+    for item in order_item_repo::find_by_orders(ex, order_ids).await? {
         items_by_order
             .entry(id_to_string(&item.order))
             .or_default()
@@ -298,6 +307,15 @@ async fn cancel_order_in_tx(
         return Err(AppError::NotFound);
     }
 
+    cancel_pending_in_tx(ex, order).await
+}
+
+/// Cancela um pedido pendente e devolve o estoque dos itens (sem checar o dono: quem
+/// chama decide quem pode cancelar). Deve rodar dentro de uma transação.
+async fn cancel_pending_in_tx(
+    ex: &Executor<'_>,
+    order: OrderRecord,
+) -> Result<OrderView, AppError> {
     let cancelled = order_repo::cancel_if_pending(ex, order.id.clone())
         .await?
         .ok_or_else(|| AppError::Conflict("Only pending orders can be cancelled".to_string()))?;
@@ -345,4 +363,124 @@ async fn pay_order_once(
 
     let items = order_item_repo::find_by_orders(&ex, vec![paid.id.clone()]).await?;
     build_view(paid, items)
+}
+
+/// Pedidos de todos os clientes, com filtro opcional de status e paginação.
+pub async fn admin_list_orders(
+    db: &Surreal<Any>,
+    query: ListOrdersQuery,
+) -> Result<Vec<AdminOrderView>, AppError> {
+    let ex = Executor::Db(db);
+    let page = OrderPage {
+        status: query.status.map(|status| status.as_str().to_string()),
+        limit: query.limit.unwrap_or(DEFAULT_PAGE_SIZE),
+        offset: query.offset.unwrap_or(0),
+    };
+
+    let orders = order_repo::find_page(&ex, page).await?;
+    let owners: Vec<String> = orders
+        .iter()
+        .map(|order| id_to_string(&order.customer))
+        .collect();
+    let views = views_for(&ex, orders).await?;
+
+    Ok(owners
+        .into_iter()
+        .zip(views)
+        .map(|(customer_id, order)| AdminOrderView { customer_id, order })
+        .collect())
+}
+
+pub async fn admin_get_order(
+    db: &Surreal<Any>,
+    order_id: &str,
+) -> Result<AdminOrderView, AppError> {
+    let ex = Executor::Db(db);
+    let order = order_repo::find_by_id(&ex, order_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let customer_id = id_to_string(&order.customer);
+    let items = order_item_repo::find_by_orders(&ex, vec![order.id.clone()]).await?;
+    Ok(AdminOrderView {
+        customer_id,
+        order: build_view(order, items)?,
+    })
+}
+
+/// Muda o status seguindo o ciclo `pending -> paid | cancelled`, `paid -> shipped ->
+/// delivered`. Cancelar um pedido pendente devolve o estoque, como no cancelamento do
+/// cliente. Repete em caso de conflito de escrita (ver `retry_on_conflict`).
+pub async fn admin_update_status(
+    db: &Surreal<Any>,
+    order_id: &str,
+    next: OrderStatus,
+) -> Result<AdminOrderView, AppError> {
+    retry_on_conflict(|| admin_update_status_once(db, order_id, next)).await
+}
+
+async fn admin_update_status_once(
+    db: &Surreal<Any>,
+    order_id: &str,
+    next: OrderStatus,
+) -> Result<AdminOrderView, AppError> {
+    let tx = db.clone().begin().await?;
+    let result = admin_update_status_in_tx(&Executor::Tx(&tx), order_id, next).await;
+
+    match result {
+        Ok(view) => {
+            tx.commit().await?;
+            Ok(view)
+        }
+        Err(e) => {
+            if let Err(cancel_err) = tx.cancel().await {
+                eprintln!("Failed to roll back transaction: {cancel_err:?}");
+            }
+            Err(e)
+        }
+    }
+}
+
+async fn admin_update_status_in_tx(
+    ex: &Executor<'_>,
+    order_id: &str,
+    next: OrderStatus,
+) -> Result<AdminOrderView, AppError> {
+    let order = order_repo::find_by_id(ex, order_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let current = OrderStatus::from_db(&order.status)
+        .ok_or_else(|| AppError::Internal("unknown order status".to_string()))?;
+
+    if !current.can_become(next) {
+        return Err(AppError::Conflict(format!(
+            "Cannot change an order from {} to {}",
+            current.as_str(),
+            next.as_str()
+        )));
+    }
+
+    let customer_id = id_to_string(&order.customer);
+    let view = if next == OrderStatus::Cancelled {
+        cancel_pending_in_tx(ex, order).await?
+    } else {
+        let change = StatusChange {
+            id: order.id.clone(),
+            from: current.as_str().to_string(),
+            to: next.as_str().to_string(),
+        };
+        // `None`: outra mudança chegou primeiro e o pedido já saiu do status de origem.
+        let updated = order_repo::change_status(ex, change)
+            .await?
+            .ok_or_else(|| {
+                AppError::Conflict("The order status changed in the meantime".to_string())
+            })?;
+        let items = order_item_repo::find_by_orders(ex, vec![updated.id.clone()]).await?;
+        build_view(updated, items)?
+    };
+
+    Ok(AdminOrderView {
+        customer_id,
+        order: view,
+    })
 }

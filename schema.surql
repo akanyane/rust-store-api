@@ -56,7 +56,8 @@ DEFINE INDEX IF NOT EXISTS cart_item_cart_variant_unique ON cart_item FIELDS car
 -- (nome, SKU e preço da hora), porque a variante pode mudar depois.
 DEFINE TABLE IF NOT EXISTS order SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS customer    ON order TYPE record<customer>;
-DEFINE FIELD IF NOT EXISTS status      ON order TYPE string DEFAULT 'pending' ASSERT $value IN ['pending', 'paid', 'cancelled'];
+-- OVERWRITE: a lista de status cresceu, e IF NOT EXISTS não atualizaria bancos já criados.
+DEFINE FIELD OVERWRITE status ON order TYPE string DEFAULT 'pending' ASSERT $value IN ['pending', 'paid', 'cancelled', 'shipped', 'delivered'];
 DEFINE FIELD IF NOT EXISTS total ON order TYPE int ASSERT $value >= 0;
 DEFINE FIELD IF NOT EXISTS created_at  ON order TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS order_customer ON order FIELDS customer;

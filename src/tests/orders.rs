@@ -282,7 +282,7 @@ async fn race_to_buy(app: &TestApp, item: &super::Item, buyers: usize) -> Vec<St
     statuses
 }
 
-fn count(statuses: &[StatusCode], wanted: StatusCode) -> usize {
+pub(super) fn count(statuses: &[StatusCode], wanted: StatusCode) -> usize {
     statuses.iter().filter(|s| **s == wanted).count()
 }
 
@@ -346,7 +346,12 @@ async fn concurrent_cancels_of_the_same_order_return_the_stock_only_once() {
 }
 
 /// Cliente compra `quantity` unidades do item e devolve o id do pedido pendente.
-async fn place_order(app: &TestApp, token: &str, item: &super::Item, quantity: i64) -> String {
+pub(super) async fn place_order(
+    app: &TestApp,
+    token: &str,
+    item: &super::Item,
+    quantity: i64,
+) -> String {
     assert_eq!(app.add_to_cart(token, item, quantity).await, StatusCode::OK);
     let (status, order) = app.send("POST", "/orders", Some(token), None).await;
     assert_eq!(status, StatusCode::CREATED);

@@ -1,7 +1,7 @@
 use surrealdb::types::RecordId;
 
 use crate::executor::Executor;
-use crate::models::order::{NewOrder, OrderRecord};
+use crate::models::order::{NewOrder, OrderPage, OrderRecord, StatusChange};
 
 pub async fn create(ex: &Executor<'_>, data: NewOrder) -> surrealdb::Result<Option<OrderRecord>> {
     ex.create("order", data).await
@@ -64,6 +64,35 @@ pub async fn pay_if_pending(
             "UPDATE $id SET status = 'paid' WHERE status = 'pending'",
             "id",
             id,
+        )
+        .await?;
+    Ok(rows.into_iter().next())
+}
+
+/// Pedidos de todos os clientes, do mais recente para o mais antigo, com filtro opcional
+/// de status e paginação.
+pub async fn find_page(ex: &Executor<'_>, page: OrderPage) -> surrealdb::Result<Vec<OrderRecord>> {
+    ex.query_all(
+        "SELECT * FROM order WHERE ($page.status = NONE OR status = $page.status) \
+         ORDER BY created_at DESC LIMIT $page.limit START $page.offset",
+        "page",
+        page,
+    )
+    .await
+}
+
+/// Troca o status só se o pedido ainda estiver em `from`. A checagem e a troca são um
+/// único comando, então duas mudanças simultâneas não passam as duas.
+/// Devolve `None` quando o pedido não estava em `from` (nada foi alterado).
+pub async fn change_status(
+    ex: &Executor<'_>,
+    change: StatusChange,
+) -> surrealdb::Result<Option<OrderRecord>> {
+    let rows: Vec<OrderRecord> = ex
+        .query_all(
+            "UPDATE $change.id SET status = $change.to WHERE status = $change.from",
+            "change",
+            change,
         )
         .await?;
     Ok(rows.into_iter().next())

@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{FromRequest, FromRequestParts, Request},
+    extract::{FromRequest, FromRequestParts, Query, Request},
     http::{header::AUTHORIZATION, request::Parts},
 };
 use serde::de::DeserializeOwned;
@@ -98,4 +98,28 @@ fn describe_errors(errors: &ValidationErrors) -> String {
         .collect();
     lines.sort();
     lines.join("; ")
+}
+
+/// O irmão do `ValidatedJson` para parâmetros de URL: 422 no formato padrão, sem o
+/// texto cru do Axum.
+pub struct ValidatedQuery<T>(pub T);
+
+impl<T, S> FromRequestParts<S> for ValidatedQuery<T>
+where
+    T: DeserializeOwned + Validate,
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let Query(value) = Query::<T>::from_request_parts(parts, state)
+            .await
+            .map_err(|_| AppError::Validation("Invalid query parameters".to_string()))?;
+
+        value
+            .validate()
+            .map_err(|errors| AppError::Validation(describe_errors(&errors)))?;
+
+        Ok(ValidatedQuery(value))
+    }
 }

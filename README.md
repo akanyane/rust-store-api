@@ -57,6 +57,9 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 | GET | `/orders/{id}` | cliente | Detalha um pedido do cliente |
 | POST | `/orders/{id}/cancel` | cliente | Cancela um pedido pendente e devolve o estoque |
 | POST | `/orders/{id}/pay` | cliente | Pagamento simulado de um pedido pendente |
+| GET | `/admin/orders` | admin | Lista os pedidos de todos os clientes (`?status=`, `?limit=`, `?offset=`) |
+| GET | `/admin/orders/{id}` | admin | Detalha qualquer pedido |
+| PUT | `/admin/orders/{id}/status` | admin | Muda o status do pedido |
 
 ## Autenticação
 
@@ -109,12 +112,18 @@ Os corpos JSON passam pelo extractor `ValidatedJson` (crate `validator`). Corpo 
 cargo test
 ```
 
-Os testes sobem o app completo (rotas, services e schema) com um banco SurrealKV novo num diretório temporário e chamam o `Router` em memória, sem abrir porta. Não tocam em `data/rust-store`. Cobrem autenticação (inclusive refresh simultâneo), catálogo, carrinho, checkout (rollback e corrida pelo último item), cancelamento e pagamento (inclusive simultâneos) e limpeza de sessões.
+Os testes sobem o app completo (rotas, services e schema) com um banco SurrealKV novo num diretório temporário e chamam o `Router` em memória, sem abrir porta. Não tocam em `data/rust-store`. Cobrem autenticação (inclusive refresh simultâneo), catálogo, carrinho, checkout (rollback e corrida pelo último item), cancelamento, pagamento e rotas de admin de pedidos (inclusive simultâneos) e limpeza de sessões.
 
 ## Pagamento
 
 O pagamento é simulado: `POST /orders/{id}/pay` só troca o status de `pending` para `paid`, sem gateway nem dados de cartão. O estoque não muda (já foi baixado no checkout). Só pedido pendente paga; pedido `paid` ou `cancelled` devolve `409`. Não há reembolso, então um pedido pago **não pode ser cancelado**. Pagar e cancelar ao mesmo tempo tem um único vencedor.
 
+## Pedidos no admin
+
+Ciclo de status: `pending` → `paid` ou `cancelled`; `paid` → `shipped` → `delivered`. `cancelled` e `delivered` são finais. `PUT /admin/orders/{id}/status` recebe `{"status": "paid"}` e devolve `409` para qualquer transição fora do ciclo. Cancelar um pedido pendente devolve o estoque; pedido pago não cancela (sem reembolso). O cliente continua podendo pagar e cancelar o que é seu, mas só enquanto o pedido está `pending`.
+
+`GET /admin/orders` lista do mais recente para o mais antigo, com `limit` (1 a 200, padrão 50) e `offset`. Cada pedido traz só o `customer_id` do dono, sem dados pessoais. Parâmetros inválidos devolvem `422`.
+
 ## Limitações conhecidas
 
-Não há gateway de pagamento real, reembolso, nem rotas de admin para pedidos (listar todos, mudar status).
+Não há gateway de pagamento real nem reembolso.
