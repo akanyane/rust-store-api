@@ -130,8 +130,6 @@ pub struct UpdateOrderStatus {
     pub status: OrderStatus,
 }
 
-pub const DEFAULT_PAGE_SIZE: i64 = 50;
-
 #[derive(Debug, Deserialize, Validate)]
 pub struct ListOrdersQuery {
     pub status: Option<OrderStatus>,

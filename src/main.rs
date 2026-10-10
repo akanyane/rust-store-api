@@ -108,6 +108,14 @@ fn build_router(state: AppState) -> Router {
         .route("/orders/{id}", get(order_handlers::get_order))
         .route("/orders/{id}/cancel", post(order_handlers::cancel_order))
         .route("/orders/{id}/pay", post(order_handlers::pay_order))
+        .route(
+            "/admin/products",
+            get(product_handlers::admin_list_products),
+        )
+        .route(
+            "/admin/products/{id}",
+            get(product_handlers::admin_get_product),
+        )
         .route("/admin/orders", get(order_handlers::admin_list_orders))
         .route("/admin/orders/{id}", get(order_handlers::admin_get_order))
         .route(

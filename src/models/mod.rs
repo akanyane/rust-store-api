@@ -11,6 +11,9 @@ pub mod variant;
 use surrealdb::types::{RecordId, RecordIdKey};
 use validator::ValidationError;
 
+/// Tamanho de página das listagens de admin quando `limit` não é informado.
+pub const DEFAULT_PAGE_SIZE: i64 = 50;
+
 /// Rejects empty or whitespace-only text (the validator `length` does not trim).
 pub fn validate_not_blank(value: &str) -> Result<(), ValidationError> {
     if value.trim().is_empty() {

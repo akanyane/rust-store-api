@@ -3,6 +3,7 @@
 //! contra o `Router`, sem abrir porta.
 
 mod admin_orders;
+mod admin_products;
 mod auth;
 mod cart;
 mod catalog;

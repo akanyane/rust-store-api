@@ -2,11 +2,12 @@ use surrealdb::{Surreal, engine::any::Any};
 
 use crate::error::AppError;
 use crate::executor::Executor;
-use crate::models::id_to_string;
 use crate::models::product::{
-    CreateProduct, NewProduct, Product, ProductChanges, ProductDetail, UpdateProduct,
+    CreateProduct, ListProductsQuery, NewProduct, Product, ProductChanges, ProductDetail,
+    ProductPage, ProductRecord, UpdateProduct,
 };
 use crate::models::variant::{NewVariant, Variant};
+use crate::models::{DEFAULT_PAGE_SIZE, id_to_string};
 use crate::repositories::{product as product_repo, variant as variant_repo};
 
 pub async fn list_products(db: &Surreal<Any>) -> Result<Vec<Product>, AppError> {
@@ -29,16 +30,50 @@ pub async fn get_product(db: &Surreal<Any>, id: &str) -> Result<ProductDetail, A
         return Err(AppError::NotFound);
     }
 
-    let variants = variant_repo::find_by_product(&ex, record.id.clone()).await?;
+    detail_of(&ex, record, true).await
+}
+
+/// Monta o detalhe do produto. `only_active` esconde as variantes desativadas (catálogo
+/// público); o admin vê todas.
+async fn detail_of(
+    ex: &Executor<'_>,
+    record: ProductRecord,
+    only_active: bool,
+) -> Result<ProductDetail, AppError> {
+    let variants = variant_repo::find_by_product(ex, record.id.clone()).await?;
 
     Ok(ProductDetail::new(
         Product::from(record),
         variants
             .into_iter()
-            .filter(|variant| variant.active)
+            .filter(|variant| !only_active || variant.active)
             .map(Variant::from)
             .collect(),
     ))
+}
+
+/// Produtos de qualquer status, para o admin achar o que foi desativado e reativar.
+pub async fn admin_list_products(
+    db: &Surreal<Any>,
+    query: ListProductsQuery,
+) -> Result<Vec<Product>, AppError> {
+    let page = ProductPage {
+        active: query.active,
+        limit: query.limit.unwrap_or(DEFAULT_PAGE_SIZE),
+        offset: query.offset.unwrap_or(0),
+    };
+    let records = product_repo::find_page(&Executor::Db(db), page).await?;
+    Ok(records.into_iter().map(Product::from).collect())
+}
+
+/// Detalhe para o admin: mesmo com o produto inativo, e com todas as variantes.
+pub async fn admin_get_product(db: &Surreal<Any>, id: &str) -> Result<ProductDetail, AppError> {
+    let ex = Executor::Db(db);
+    let record = product_repo::find_by_id(&ex, id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    detail_of(&ex, record, false).await
 }
 
 pub async fn create_product(db: &Surreal<Any>, input: CreateProduct) -> Result<Product, AppError> {

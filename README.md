@@ -48,6 +48,8 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 | DELETE | `/products/{id}` | admin | Desativa o produto (exclusão lógica) |
 | PUT | `/products/{id}/variants/{variant_id}` | admin | Substitui nome, SKU, preço, estoque e `active` da variante |
 | DELETE | `/products/{id}/variants/{variant_id}` | admin | Desativa a variante (exclusão lógica) |
+| GET | `/admin/products` | admin | Lista produtos ativos e inativos (`?active=`, `?limit=`, `?offset=`) |
+| GET | `/admin/products/{id}` | admin | Detalha o produto (mesmo inativo) com todas as variantes, inclusive as inativas |
 | GET, PUT, DELETE | `/me` | cliente | Consulta, atualiza e remove o próprio cadastro |
 | GET | `/cart` | cliente | Consulta o carrinho |
 | POST | `/cart/items` | cliente | Adiciona variante ao carrinho |
@@ -84,7 +86,7 @@ O `total` continua somando todos os itens, disponíveis ou não, e nenhum item �
 
 ## Exclusão lógica
 
-`DELETE` em produto ou variante não apaga o registro: marca `active = false`, porque pedidos e carrinhos apontam para eles. Itens inativos somem do catálogo público (`GET /products`, `/products/{id}`, `/products/{id}/variants`) e não entram no carrinho nem no checkout. Para reativar, use o `PUT` com `"active": true`. O `stock` do `PUT` é um valor absoluto: um checkout simultâneo pode ser sobrescrito.
+`DELETE` em produto ou variante não apaga o registro: marca `active = false`, porque pedidos e carrinhos apontam para eles. Itens inativos somem do catálogo público (`GET /products`, `/products/{id}`, `/products/{id}/variants`) e não entram no carrinho nem no checkout. Para reativar, use o `PUT` com `"active": true`; os ids de quem foi desativado se descobrem em `GET /admin/products?active=false` (produtos) e `GET /admin/products/{id}` (variantes, com o `active` de cada uma). A listagem de admin vem ordenada por nome (e id, em empate) e aceita `limit` (1 a 200, padrão 50) e `offset`; parâmetros inválidos devolvem `422`. A listagem pública não tem ordem definida. O `stock` do `PUT` é um valor absoluto: um checkout simultâneo pode ser sobrescrito.
 
 ## Checkout
 
@@ -121,7 +123,7 @@ Os corpos JSON passam pelo extractor `ValidatedJson` (crate `validator`). Corpo 
 cargo test
 ```
 
-Os testes sobem o app completo (rotas, services e schema) com um banco SurrealKV novo num diretório temporário e chamam o `Router` em memória, sem abrir porta. Não tocam em `data/rust-store`. Cobrem autenticação (inclusive refresh simultâneo), catálogo, carrinho (inclusive itens indisponíveis), checkout (rollback e corrida pelo último item), cancelamento, pagamento e rotas de admin de pedidos (inclusive simultâneos) e limpeza de sessões.
+Os testes sobem o app completo (rotas, services e schema) com um banco SurrealKV novo num diretório temporário e chamam o `Router` em memória, sem abrir porta. Não tocam em `data/rust-store`. Cobrem autenticação (inclusive refresh simultâneo), catálogo (inclusive o admin de inativos), carrinho (inclusive itens indisponíveis), checkout (rollback e corrida pelo último item), cancelamento, pagamento e rotas de admin de pedidos (inclusive simultâneos) e limpeza de sessões.
 
 ## Pagamento
 

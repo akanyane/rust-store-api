@@ -5,8 +5,10 @@ use axum::{
 };
 
 use crate::error::AppError;
-use crate::extractors::{AuthAdmin, ValidatedJson};
-use crate::models::product::{CreateProduct, Product, ProductDetail, UpdateProduct};
+use crate::extractors::{AuthAdmin, ValidatedJson, ValidatedQuery};
+use crate::models::product::{
+    CreateProduct, ListProductsQuery, Product, ProductDetail, UpdateProduct,
+};
 use crate::services::product as product_service;
 use crate::state::AppState;
 
@@ -49,4 +51,22 @@ pub async fn delete_product(
 ) -> Result<StatusCode, AppError> {
     product_service::delete_product(&state.db, &id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn admin_list_products(
+    State(state): State<AppState>,
+    _admin: AuthAdmin,
+    ValidatedQuery(query): ValidatedQuery<ListProductsQuery>,
+) -> Result<Json<Vec<Product>>, AppError> {
+    let products = product_service::admin_list_products(&state.db, query).await?;
+    Ok(Json(products))
+}
+
+pub async fn admin_get_product(
+    State(state): State<AppState>,
+    _admin: AuthAdmin,
+    Path(id): Path<String>,
+) -> Result<Json<ProductDetail>, AppError> {
+    let product = product_service::admin_get_product(&state.db, &id).await?;
+    Ok(Json(product))
 }
