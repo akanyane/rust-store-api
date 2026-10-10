@@ -44,6 +44,10 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 | GET | `/products/{id}` | pública | Detalha produto |
 | GET | `/products/{id}/variants` | pública | Lista variantes do produto |
 | POST | `/products/{id}/variants` | admin | Cria variante |
+| PUT | `/products/{id}` | admin | Substitui nome, descrição e `active` do produto |
+| DELETE | `/products/{id}` | admin | Desativa o produto (exclusão lógica) |
+| PUT | `/products/{id}/variants/{variant_id}` | admin | Substitui nome, SKU, preço, estoque e `active` da variante |
+| DELETE | `/products/{id}/variants/{variant_id}` | admin | Desativa a variante (exclusão lógica) |
 | GET, PUT, DELETE | `/me` | cliente | Consulta, atualiza e remove o próprio cadastro |
 | GET | `/cart` | cliente | Consulta o carrinho |
 | POST | `/cart/items` | cliente | Adiciona variante ao carrinho |
@@ -62,6 +66,10 @@ Rotas protegidas esperam o cabeçalho `Authorization: Bearer <session_token>`.
 - Sessões com refresh token vencido são apagadas na partida e depois a cada hora.
 - Senhas são guardadas com argon2; tokens, apenas como hash SHA-256.
 - O cliente é sempre identificado pelo token, nunca por um id na URL.
+
+## Exclusão lógica
+
+`DELETE` em produto ou variante não apaga o registro: marca `active = false`, porque pedidos e carrinhos apontam para eles. Itens inativos somem do catálogo público (`GET /products`, `/products/{id}`, `/products/{id}/variants`) e não entram no carrinho nem no checkout. Para reativar, use o `PUT` com `"active": true`. O `stock` do `PUT` é um valor absoluto: um checkout simultâneo pode ser sobrescrito.
 
 ## Checkout
 

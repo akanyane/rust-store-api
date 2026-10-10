@@ -72,3 +72,40 @@ impl From<VariantRecord> for Variant {
         }
     }
 }
+
+/// Substituição completa (PUT).
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdateVariant {
+    #[validate(
+        custom(
+            function = "crate::models::validate_not_blank",
+            message = "must not be blank"
+        ),
+        length(max = 200, message = "at most 200 characters")
+    )]
+    pub name: String,
+    #[validate(
+        custom(
+            function = "crate::models::validate_not_blank",
+            message = "must not be blank"
+        ),
+        length(max = 64, message = "at most 64 characters")
+    )]
+    pub sku: String,
+    #[validate(range(min = 0, message = "must not be negative"))]
+    pub price: i64,
+    #[validate(range(min = 0, message = "must not be negative"))]
+    pub stock: i32,
+    pub active: bool,
+}
+
+/// O `update` substitui o registro inteiro, então a referência ao produto vai junto.
+#[derive(Debug, SurrealValue)]
+pub struct VariantChanges {
+    pub product: RecordId,
+    pub name: String,
+    pub sku: String,
+    pub price: i64,
+    pub stock: i32,
+    pub active: bool,
+}

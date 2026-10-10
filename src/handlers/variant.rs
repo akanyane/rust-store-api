@@ -6,7 +6,7 @@ use axum::{
 
 use crate::error::AppError;
 use crate::extractors::{AuthAdmin, ValidatedJson};
-use crate::models::variant::{CreateVariant, Variant};
+use crate::models::variant::{CreateVariant, UpdateVariant, Variant};
 use crate::services::variant as variant_service;
 use crate::state::AppState;
 
@@ -26,4 +26,24 @@ pub async fn create_variant(
 ) -> Result<(StatusCode, Json<Variant>), AppError> {
     let variant = variant_service::create_variant(&state.db, &product_id, input).await?;
     Ok((StatusCode::CREATED, Json(variant)))
+}
+
+pub async fn update_variant(
+    State(state): State<AppState>,
+    _admin: AuthAdmin,
+    Path((product_id, variant_id)): Path<(String, String)>,
+    ValidatedJson(input): ValidatedJson<UpdateVariant>,
+) -> Result<Json<Variant>, AppError> {
+    let variant =
+        variant_service::update_variant(&state.db, &product_id, &variant_id, input).await?;
+    Ok(Json(variant))
+}
+
+pub async fn delete_variant(
+    State(state): State<AppState>,
+    _admin: AuthAdmin,
+    Path((product_id, variant_id)): Path<(String, String)>,
+) -> Result<StatusCode, AppError> {
+    variant_service::delete_variant(&state.db, &product_id, &variant_id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

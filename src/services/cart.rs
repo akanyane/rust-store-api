@@ -10,7 +10,7 @@ use crate::models::id_to_string;
 use crate::models::variant::VariantRecord;
 use crate::repositories::{
     cart as cart_repo, cart_item as cart_item_repo, customer as customer_repo,
-    variant as variant_repo,
+    product as product_repo, variant as variant_repo,
 };
 
 fn ensure_valid_quantity(quantity: i32) -> Result<(), AppError> {
@@ -22,8 +22,15 @@ fn ensure_valid_quantity(quantity: i32) -> Result<(), AppError> {
     Ok(())
 }
 
-fn ensure_purchasable(variant: &VariantRecord, quantity: i32) -> Result<(), AppError> {
-    if !variant.active {
+async fn ensure_purchasable(
+    ex: &Executor<'_>,
+    variant: &VariantRecord,
+    quantity: i32,
+) -> Result<(), AppError> {
+    let product_active = product_repo::find_by_id(ex, &id_to_string(&variant.product))
+        .await?
+        .is_some_and(|product| product.active);
+    if !variant.active || !product_active {
         return Err(AppError::Conflict("Variant unavailable".to_string()));
     }
     if quantity > variant.stock {
@@ -154,7 +161,7 @@ async fn add_item_in_tx(
         .checked_add(quantity)
         .ok_or(AppError::Validation("Invalid quantity".to_string()))?;
 
-    ensure_purchasable(&variant, new_quantity)?;
+    ensure_purchasable(ex, &variant, new_quantity).await?;
 
     let data = NewCartItem {
         cart: cart.id.clone(),
@@ -191,7 +198,7 @@ pub async fn update_item(
         .await?
         .ok_or(AppError::NotFound)?;
 
-    ensure_purchasable(&variant, input.quantity)?;
+    ensure_purchasable(&ex, &variant, input.quantity).await?;
 
     let data = NewCartItem {
         cart: cart.id.clone(),

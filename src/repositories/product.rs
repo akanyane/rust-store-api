@@ -1,7 +1,7 @@
 use surrealdb::types::RecordId;
 
 use crate::executor::Executor;
-use crate::models::product::{NewProduct, ProductRecord};
+use crate::models::product::{NewProduct, ProductChanges, ProductRecord};
 
 pub async fn find_all(ex: &Executor<'_>) -> surrealdb::Result<Vec<ProductRecord>> {
     ex.select_all("product").await
@@ -28,4 +28,12 @@ pub async fn create(
     data: NewProduct,
 ) -> surrealdb::Result<Option<ProductRecord>> {
     ex.create("product", data).await
+}
+
+pub async fn update(
+    ex: &Executor<'_>,
+    id: RecordId,
+    data: ProductChanges,
+) -> surrealdb::Result<Option<ProductRecord>> {
+    ex.update_one(id, data).await
 }

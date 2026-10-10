@@ -1,7 +1,7 @@
 use surrealdb::types::{RecordId, SurrealValue};
 
 use crate::executor::Executor;
-use crate::models::variant::{NewVariant, VariantRecord};
+use crate::models::variant::{NewVariant, VariantChanges, VariantRecord};
 
 pub async fn create(
     ex: &Executor<'_>,
@@ -88,4 +88,23 @@ pub async fn increment_stock(
         )
         .await?;
     Ok(rows.into_iter().next())
+}
+
+pub async fn find_by_sku(ex: &Executor<'_>, sku: &str) -> surrealdb::Result<Option<VariantRecord>> {
+    let rows: Vec<VariantRecord> = ex
+        .query_all(
+            "SELECT * FROM variant WHERE sku = $sku LIMIT 1",
+            "sku",
+            sku.to_string(),
+        )
+        .await?;
+    Ok(rows.into_iter().next())
+}
+
+pub async fn update(
+    ex: &Executor<'_>,
+    id: RecordId,
+    data: VariantChanges,
+) -> surrealdb::Result<Option<VariantRecord>> {
+    ex.update_one(id, data).await
 }

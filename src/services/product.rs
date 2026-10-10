@@ -3,13 +3,19 @@ use surrealdb::{Surreal, engine::any::Any};
 use crate::error::AppError;
 use crate::executor::Executor;
 use crate::models::id_to_string;
-use crate::models::product::{CreateProduct, NewProduct, Product, ProductDetail};
+use crate::models::product::{
+    CreateProduct, NewProduct, Product, ProductChanges, ProductDetail, UpdateProduct,
+};
 use crate::models::variant::{NewVariant, Variant};
 use crate::repositories::{product as product_repo, variant as variant_repo};
 
 pub async fn list_products(db: &Surreal<Any>) -> Result<Vec<Product>, AppError> {
     let records = product_repo::find_all(&Executor::Db(db)).await?;
-    Ok(records.into_iter().map(Product::from).collect())
+    Ok(records
+        .into_iter()
+        .filter(|record| record.active)
+        .map(Product::from)
+        .collect())
 }
 
 pub async fn get_product(db: &Surreal<Any>, id: &str) -> Result<ProductDetail, AppError> {
@@ -18,11 +24,20 @@ pub async fn get_product(db: &Surreal<Any>, id: &str) -> Result<ProductDetail, A
         .await?
         .ok_or(AppError::NotFound)?;
 
+    // Produto desativado some do catálogo público.
+    if !record.active {
+        return Err(AppError::NotFound);
+    }
+
     let variants = variant_repo::find_by_product(&ex, record.id.clone()).await?;
 
     Ok(ProductDetail::new(
         Product::from(record),
-        variants.into_iter().map(Variant::from).collect(),
+        variants
+            .into_iter()
+            .filter(|variant| variant.active)
+            .map(Variant::from)
+            .collect(),
     ))
 }
 
@@ -67,4 +82,47 @@ async fn insert_product_with_default_variant(
     variant_repo::create(ex, default_variant).await?;
 
     Ok(Product::from(product))
+}
+
+pub async fn update_product(
+    db: &Surreal<Any>,
+    id: &str,
+    input: UpdateProduct,
+) -> Result<Product, AppError> {
+    let ex = Executor::Db(db);
+    let current = product_repo::find_by_id(&ex, id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    let changes = ProductChanges {
+        name: input.name,
+        description: input.description,
+        active: input.active,
+    };
+    let record = product_repo::update(&ex, current.id, changes)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    Ok(Product::from(record))
+}
+
+/// Exclusão lógica: pedidos e carrinhos apontam para o produto e suas variantes.
+/// Idempotente: desativar de novo não é erro.
+pub async fn delete_product(db: &Surreal<Any>, id: &str) -> Result<(), AppError> {
+    let ex = Executor::Db(db);
+    let current = product_repo::find_by_id(&ex, id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    if current.active {
+        let changes = ProductChanges {
+            name: current.name,
+            description: current.description,
+            active: false,
+        };
+        product_repo::update(&ex, current.id, changes)
+            .await?
+            .ok_or(AppError::NotFound)?;
+    }
+    Ok(())
 }

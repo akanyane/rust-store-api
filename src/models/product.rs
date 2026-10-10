@@ -76,3 +76,26 @@ impl From<ProductRecord> for Product {
         }
     }
 }
+
+/// Substituição completa (PUT). Preço e estoque vivem nas variantes.
+#[derive(Debug, Deserialize, Validate)]
+pub struct UpdateProduct {
+    #[validate(
+        custom(
+            function = "crate::models::validate_not_blank",
+            message = "must not be blank"
+        ),
+        length(max = 200, message = "at most 200 characters")
+    )]
+    pub name: String,
+    #[validate(length(max = 2000, message = "at most 2000 characters"))]
+    pub description: String,
+    pub active: bool,
+}
+
+#[derive(Debug, SurrealValue)]
+pub struct ProductChanges {
+    pub name: String,
+    pub description: String,
+    pub active: bool,
+}

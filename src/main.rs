@@ -84,10 +84,19 @@ async fn main() {
             "/products",
             get(product_handlers::list_products).post(product_handlers::create_product),
         )
-        .route("/products/{id}", get(product_handlers::get_product))
+        .route(
+            "/products/{id}",
+            get(product_handlers::get_product)
+                .put(product_handlers::update_product)
+                .delete(product_handlers::delete_product),
+        )
         .route(
             "/products/{id}/variants",
             get(variant_handlers::list_variants).post(variant_handlers::create_variant),
+        )
+        .route(
+            "/products/{id}/variants/{variant_id}",
+            put(variant_handlers::update_variant).delete(variant_handlers::delete_variant),
         )
         .route(
             "/me",
