@@ -194,14 +194,6 @@ async fn issue_tokens(ex: &Executor<'_>, user: RecordId) -> Result<TokenPair, Ap
     Ok(tokens)
 }
 
-/// Dois refreshes simultâneos com o mesmo token colidem na escrita da sessão. O SDK
-/// embarcado devolve isso como erro `Internal` sem detalhe estruturado, então só a
-/// mensagem o identifica. Quem perde a corrida deve receber 401, como se o token já
-/// tivesse sido gasto (o que de fato aconteceu).
-fn is_write_conflict(e: &AppError) -> bool {
-    matches!(e, AppError::Database(db_err) if db_err.message().contains("Transaction conflict"))
-}
-
 /// Troca um refresh token válido por um par novo (rotação): a sessão antiga é
 /// apagada, então um refresh token só vale uma vez. Tudo numa transação.
 pub async fn refresh(db: &Surreal<Any>, refresh_token: &str) -> Result<TokenPair, AppError> {
@@ -211,14 +203,14 @@ pub async fn refresh(db: &Surreal<Any>, refresh_token: &str) -> Result<TokenPair
     match result {
         Ok(tokens) => match tx.commit().await {
             Ok(_) => Ok(tokens),
-            Err(e) if is_write_conflict(&AppError::from(e.clone())) => Err(AppError::Unauthorized),
+            Err(e) if AppError::from(e.clone()).is_write_conflict() => Err(AppError::Unauthorized),
             Err(e) => Err(e.into()),
         },
         Err(e) => {
             if let Err(cancel_err) = tx.cancel().await {
                 eprintln!("Failed to roll back transaction: {cancel_err:?}");
             }
-            if is_write_conflict(&e) {
+            if e.is_write_conflict() {
                 return Err(AppError::Unauthorized);
             }
             Err(e)

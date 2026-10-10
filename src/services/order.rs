@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use surrealdb::{Surreal, engine::any::Any, types::RecordId};
@@ -16,6 +17,34 @@ use crate::repositories::{
     cart as cart_repo, cart_item as cart_item_repo, customer as customer_repo, order as order_repo,
     order_item as order_item_repo, product as product_repo, variant as variant_repo,
 };
+
+const MAX_ATTEMPTS: u32 = 5;
+
+/// Roda a operação e a repete quando a transação perde uma corrida de escrita (o SDK
+/// avisa que ela "pode ser repetida"). Na repetição o resultado sai certo sozinho: quem
+/// perdeu a última unidade recebe o 409 de estoque, e quem ainda cabe no estoque passa.
+/// A pausa aleatória evita que os concorrentes colidam de novo no mesmo instante.
+/// Esgotadas as tentativas, devolve 409 em vez de um 500.
+async fn retry_on_conflict<T, F, Fut>(mut operation: F) -> Result<T, AppError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, AppError>>,
+{
+    for attempt in 1..=MAX_ATTEMPTS {
+        match operation().await {
+            Err(e) if e.is_write_conflict() => {
+                if attempt < MAX_ATTEMPTS {
+                    let pause_ms = rand::random_range(10..50_u64) * u64::from(attempt);
+                    tokio::time::sleep(Duration::from_millis(pause_ms)).await;
+                }
+            }
+            other => return other,
+        }
+    }
+    Err(AppError::Conflict(
+        "The store is busy, please try again".to_string(),
+    ))
+}
 
 fn empty_cart() -> AppError {
     AppError::Conflict("The cart is empty".to_string())
@@ -51,9 +80,15 @@ fn order_total(lines: &[(VariantRecord, i32)]) -> Result<i64, AppError> {
         .ok_or_else(|| AppError::Internal("overflow in order total".to_string()))
 }
 
-/// Transforma o carrinho do cliente em pedido. Tudo numa transação: se qualquer
-/// item falhar, o estoque já baixado dos anteriores volta e nada é criado.
+/// Transforma o carrinho do cliente em pedido. Se outra compra mexer no mesmo estoque
+/// ao mesmo tempo, a transação é repetida (ver `retry_on_conflict`).
 pub async fn checkout(db: &Surreal<Any>, customer_id: &str) -> Result<OrderView, AppError> {
+    retry_on_conflict(|| checkout_once(db, customer_id)).await
+}
+
+/// Uma tentativa de checkout. Tudo numa transação: se qualquer item falhar, o estoque
+/// já baixado dos anteriores volta e nada é criado.
+async fn checkout_once(db: &Surreal<Any>, customer_id: &str) -> Result<OrderView, AppError> {
     let tx = db.clone().begin().await?;
     let result = checkout_in_tx(&Executor::Tx(&tx), customer_id).await;
 
@@ -216,8 +251,18 @@ pub async fn get_order(
     build_view(order, items)
 }
 
-/// Cancela um pedido pendente e devolve o estoque dos itens, tudo numa transação.
+/// Cancela um pedido pendente e devolve o estoque dos itens. Repete a transação em caso
+/// de conflito de escrita (ver `retry_on_conflict`).
 pub async fn cancel_order(
+    db: &Surreal<Any>,
+    customer_id: &str,
+    order_id: &str,
+) -> Result<OrderView, AppError> {
+    retry_on_conflict(|| cancel_order_once(db, customer_id, order_id)).await
+}
+
+/// Uma tentativa de cancelamento, numa transação.
+async fn cancel_order_once(
     db: &Surreal<Any>,
     customer_id: &str,
     order_id: &str,

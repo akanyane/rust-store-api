@@ -73,7 +73,7 @@ Rotas protegidas esperam o cabeçalho `Authorization: Bearer <session_token>`.
 
 ## Checkout
 
-`POST /orders` roda em uma única transação: revalida que variante e produto estão ativos, baixa o estoque (`UPDATE ... WHERE stock >= quantity`), cria o pedido `pending` com um retrato de nome, SKU e preço de cada item, e esvazia o carrinho. Se qualquer passo falhar, nada é gravado.
+`POST /orders` roda em uma única transação: revalida que variante e produto estão ativos, baixa o estoque (`UPDATE ... WHERE stock >= quantity`), cria o pedido `pending` com um retrato de nome, SKU e preço de cada item, e esvazia o carrinho. Se qualquer passo falhar, nada é gravado. Compras simultâneas do mesmo item colidem na escrita; a transação perdedora é repetida automaticamente (até 5 tentativas, com pausa aleatória), então quem perde a última unidade recebe `409` e nunca `500`. O cancelamento de pedido usa a mesma repetição.
 
 ## Estrutura
 
@@ -106,9 +106,7 @@ Os corpos JSON passam pelo extractor `ValidatedJson` (crate `validator`). Corpo 
 cargo test
 ```
 
-Os testes sobem o app completo (rotas, services e schema) com um banco SurrealKV novo num diretório temporário e chamam o `Router` em memória, sem abrir porta. Não tocam em `data/rust-store`. Cobrem autenticação (inclusive refresh simultâneo), catálogo, carrinho, checkout (rollback e corrida pelo último item), cancelamento e limpeza de sessões.
-
-Um teste está marcado com `#[ignore]` por documentar um bug conhecido: no checkout simultâneo, quem perde a corrida recebe `500` em vez de `409` (o estoque nunca é vendido a mais). Rode com `cargo test -- --ignored`.
+Os testes sobem o app completo (rotas, services e schema) com um banco SurrealKV novo num diretório temporário e chamam o `Router` em memória, sem abrir porta. Não tocam em `data/rust-store`. Cobrem autenticação (inclusive refresh simultâneo), catálogo, carrinho, checkout (rollback e corrida pelo último item), cancelamento (inclusive simultâneo) e limpeza de sessões.
 
 ## Limitações conhecidas
 

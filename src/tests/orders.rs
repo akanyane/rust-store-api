@@ -256,11 +256,11 @@ async fn cancel_requires_ownership_and_authentication() {
     assert_eq!(orders[0]["status"], "pending");
 }
 
-/// Cinco clientes disputam a última unidade ao mesmo tempo. Devolve o status de cada
-/// checkout e deixa o estoque final para o teste conferir.
-async fn race_for_the_last_unit(app: &TestApp, item: &super::Item) -> Vec<StatusCode> {
+/// `buyers` clientes, cada um com 1 unidade do item no carrinho, finalizam a compra ao
+/// mesmo tempo. Devolve o status de cada checkout.
+async fn race_to_buy(app: &TestApp, item: &super::Item, buyers: usize) -> Vec<StatusCode> {
     let mut tokens = Vec::new();
-    for n in 0..5 {
+    for n in 0..buyers {
         let token = app.customer(&format!("buyer{n}@test.dev")).await;
         assert_eq!(app.add_to_cart(&token, item, 1).await, StatusCode::OK);
         tokens.push(token);
@@ -282,37 +282,65 @@ async fn race_for_the_last_unit(app: &TestApp, item: &super::Item) -> Vec<Status
     statuses
 }
 
+fn count(statuses: &[StatusCode], wanted: StatusCode) -> usize {
+    statuses.iter().filter(|s| **s == wanted).count()
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn concurrent_checkouts_never_sell_more_than_the_stock() {
+async fn concurrent_checkouts_for_the_last_unit_sell_it_once_and_refuse_the_rest_with_409() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
     let item = app.setup_product(&admin, "Last one", 10, 1).await;
 
-    let statuses = race_for_the_last_unit(&app, &item).await;
+    let statuses = race_to_buy(&app, &item, 5).await;
 
-    let created = statuses
-        .iter()
-        .filter(|s| **s == StatusCode::CREATED)
-        .count();
-    assert_eq!(created, 1, "{statuses:?}");
+    assert_eq!(count(&statuses, StatusCode::CREATED), 1, "{statuses:?}");
+    assert_eq!(count(&statuses, StatusCode::CONFLICT), 4, "{statuses:?}");
     assert_eq!(app.stock(&item).await, 0, "{statuses:?}");
 }
 
-// Hoje quem perde a corrida recebe 500 (conflito de escrita da transação), e o certo
-// seria 409. Fica ignorado até o checkout tratar o conflito; rode com `--ignored`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "known bug: concurrent checkout losers get 500 instead of 409"]
-async fn concurrent_checkout_losers_get_409_not_500() {
+async fn concurrent_checkouts_with_some_stock_left_let_exactly_that_many_through() {
     let app = TestApp::new().await;
     let admin = app.admin().await;
-    let item = app.setup_product(&admin, "Last one", 10, 1).await;
+    let item = app.setup_product(&admin, "Three left", 10, 3).await;
 
-    let statuses = race_for_the_last_unit(&app, &item).await;
+    let statuses = race_to_buy(&app, &item, 5).await;
 
-    assert!(
-        statuses
-            .iter()
-            .all(|s| *s == StatusCode::CREATED || *s == StatusCode::CONFLICT),
-        "losers must get 409, not an internal error: {statuses:?}"
-    );
+    assert_eq!(count(&statuses, StatusCode::CREATED), 3, "{statuses:?}");
+    assert_eq!(count(&statuses, StatusCode::CONFLICT), 2, "{statuses:?}");
+    assert_eq!(app.stock(&item).await, 0, "{statuses:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_cancels_of_the_same_order_return_the_stock_only_once() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana@test.dev").await;
+    let item = app.setup_product(&admin, "Mug", 10, 5).await;
+    app.add_to_cart(&customer, &item, 2).await;
+    let (_, order) = app.send("POST", "/orders", Some(&customer), None).await;
+    let cancel = format!("/orders/{}/cancel", order["id"].as_str().unwrap());
+    assert_eq!(app.stock(&item).await, 3);
+
+    let tasks: Vec<_> = (0..5)
+        .map(|_| {
+            let router = app.router.clone();
+            let customer = customer.clone();
+            let cancel = cancel.clone();
+            tokio::spawn(async move {
+                send(&router, "POST", &cancel, Some(&customer), None)
+                    .await
+                    .0
+            })
+        })
+        .collect();
+    let mut statuses = Vec::new();
+    for task in tasks {
+        statuses.push(task.await.unwrap());
+    }
+
+    assert_eq!(count(&statuses, StatusCode::OK), 1, "{statuses:?}");
+    assert_eq!(count(&statuses, StatusCode::CONFLICT), 4, "{statuses:?}");
+    assert_eq!(app.stock(&item).await, 5, "{statuses:?}");
 }

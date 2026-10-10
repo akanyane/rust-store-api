@@ -56,3 +56,12 @@ impl IntoResponse for AppError {
         (status, Json(json!({ "error": message }))).into_response()
     }
 }
+
+impl AppError {
+    /// Duas transações que escrevem no mesmo registro ao mesmo tempo colidem, e a
+    /// perdedora pode ser repetida. O SDK embarcado devolve isso como erro `Internal`
+    /// sem detalhe estruturado, então só a mensagem o identifica.
+    pub fn is_write_conflict(&self) -> bool {
+        matches!(self, AppError::Database(e) if e.message().contains("Transaction conflict"))
+    }
+}
