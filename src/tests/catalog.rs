@@ -557,3 +557,130 @@ async fn the_admin_detail_keeps_the_same_order_and_adds_the_inactive_variants() 
     );
     assert_eq!(admin_detail["variants"][0]["active"], false);
 }
+
+async fn page(app: &TestApp, query: &str) -> (Vec<String>, Option<String>) {
+    let (status, headers, body) =
+        super::send_full(&app.router, "GET", &format!("/products{query}"), None, None).await;
+    assert_eq!(status, StatusCode::OK, "{query}");
+    let total = headers
+        .get("x-total-count")
+        .map(|value| value.to_str().unwrap().to_string());
+    (product_names(&body), total)
+}
+
+/// Cria produtos "P01", "P02", ... (a ordem por nome é a de criação).
+async fn create_numbered(app: &TestApp, admin: &str, count: usize) {
+    for n in 1..=count {
+        app.setup_product(admin, &format!("P{n:02}"), 10, 5).await;
+    }
+}
+
+#[tokio::test]
+async fn without_a_limit_the_public_list_still_returns_every_active_product() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    // Mais que o teto de `limit` (200) e que qualquer página padrão: o contrato antigo
+    // (tudo de uma vez) não pode ter mudado.
+    for n in 0..205 {
+        app.setup_product(&admin, &format!("Item {n:03}"), 10, 5)
+            .await;
+    }
+
+    let (names, total) = page(&app, "").await;
+
+    assert_eq!(names.len(), 205);
+    assert_eq!(total.as_deref(), Some("205"));
+    assert_eq!(names.first().unwrap(), "Item 000");
+    assert_eq!(names.last().unwrap(), "Item 204");
+}
+
+#[tokio::test]
+async fn limit_and_offset_cut_the_list_into_pages() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    create_numbered(&app, &admin, 5).await;
+
+    assert_eq!(page(&app, "?limit=2").await.0, ["P01", "P02"]);
+    assert_eq!(page(&app, "?limit=2&offset=2").await.0, ["P03", "P04"]);
+    assert_eq!(page(&app, "?limit=2&offset=4").await.0, ["P05"]);
+    assert!(page(&app, "?limit=2&offset=5").await.0.is_empty());
+    assert!(page(&app, "?limit=2&offset=99").await.0.is_empty());
+    assert_eq!(page(&app, "?limit=200").await.0.len(), 5);
+    // Só `offset`: o resto da lista a partir dali.
+    assert_eq!(page(&app, "?offset=3").await.0, ["P04", "P05"]);
+    assert_eq!(page(&app, "?offset=0").await.0.len(), 5);
+}
+
+#[tokio::test]
+async fn pages_follow_the_chosen_order_and_never_include_inactive_products() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    create_numbered(&app, &admin, 5).await;
+    let (_, list) = app.send("GET", "/products", None, None).await;
+    let p03 = list[2]["id"].as_str().unwrap().to_string();
+    app.send("DELETE", &format!("/products/{p03}"), Some(&admin), None)
+        .await;
+
+    // Sem o P03, e sem deixar buraco entre as páginas.
+    assert_eq!(page(&app, "?limit=2").await.0, ["P01", "P02"]);
+    assert_eq!(page(&app, "?limit=2&offset=2").await.0, ["P04", "P05"]);
+    // Do mais novo para o mais antigo, as páginas seguem essa ordem.
+    assert_eq!(page(&app, "?sort=newest&limit=2").await.0, ["P05", "P04"]);
+    assert_eq!(
+        page(&app, "?sort=newest&limit=2&offset=2").await.0,
+        ["P02", "P01"]
+    );
+}
+
+#[tokio::test]
+async fn invalid_pagination_parameters_are_422() {
+    let app = TestApp::new().await;
+
+    for query in [
+        "?limit=0",
+        "?limit=201",
+        "?limit=abc",
+        "?limit=-1",
+        "?offset=-1",
+        "?offset=x",
+    ] {
+        let (status, body) = app
+            .send("GET", &format!("/products{query}"), None, None)
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{query}");
+        assert!(body["error"].is_string(), "{query}");
+    }
+    let (_, body) = app.send("GET", "/products?limit=0", None, None).await;
+    assert_eq!(body["error"], "limit: must be between 1 and 200");
+    let (_, body) = app.send("GET", "/products?offset=-1", None, None).await;
+    assert_eq!(body["error"], "offset: must not be negative");
+}
+
+#[tokio::test]
+async fn x_total_count_is_the_number_of_active_products_whatever_the_page() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+
+    // Catálogo vazio: o total é 0, não ausente.
+    let (names, total) = page(&app, "").await;
+    assert!(names.is_empty());
+    assert_eq!(total.as_deref(), Some("0"));
+
+    create_numbered(&app, &admin, 5).await;
+    for query in [
+        "",
+        "?limit=2",
+        "?limit=2&offset=4",
+        "?offset=99",
+        "?sort=newest&limit=1",
+    ] {
+        assert_eq!(page(&app, query).await.1.as_deref(), Some("5"), "{query}");
+    }
+
+    // Desativar um produto reduz o total.
+    let (_, list) = app.send("GET", "/products", None, None).await;
+    let first = list[0]["id"].as_str().unwrap().to_string();
+    app.send("DELETE", &format!("/products/{first}"), Some(&admin), None)
+        .await;
+    assert_eq!(page(&app, "?limit=2").await.1.as_deref(), Some("4"));
+}

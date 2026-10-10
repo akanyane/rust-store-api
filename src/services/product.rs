@@ -4,20 +4,28 @@ use surrealdb::{Surreal, engine::any::Any, types::Datetime};
 use crate::error::AppError;
 use crate::executor::Executor;
 use crate::models::product::{
-    CreateProduct, ListProductsQuery, ListPublicProductsQuery, NewProduct, Product, ProductChanges,
-    ProductDetail, ProductPage, ProductRecord, UpdateProduct,
+    CreateProduct, ListProductsQuery, ListPublicProductsQuery, NO_LIMIT, NewProduct, Product,
+    ProductChanges, ProductDetail, ProductPage, ProductRecord, UpdateProduct,
 };
 use crate::models::variant::{NewVariant, Variant};
 use crate::models::{DEFAULT_PAGE_SIZE, id_to_string};
 use crate::repositories::{product as product_repo, variant as variant_repo};
 
+/// Produtos ativos e o total de ativos (independente da página). Sem `limit`, devolve todos.
+/// A contagem e a página são duas leituras: um produto criado entre elas pode deixar o
+/// total defasado em uma unidade.
 pub async fn list_products(
     db: &Surreal<Any>,
     query: ListPublicProductsQuery,
-) -> Result<Vec<Product>, AppError> {
+) -> Result<(Vec<Product>, i64), AppError> {
+    let ex = Executor::Db(db);
     let sort = query.sort.unwrap_or_default();
-    let records = product_repo::find_active(&Executor::Db(db), sort).await?;
-    Ok(records.into_iter().map(Product::from).collect())
+    let limit = query.limit.unwrap_or(NO_LIMIT);
+    let offset = query.offset.unwrap_or(0);
+
+    let records = product_repo::find_active(&ex, sort, limit, offset).await?;
+    let total = product_repo::count_active(&ex).await?;
+    Ok((records.into_iter().map(Product::from).collect(), total))
 }
 
 pub async fn get_product(db: &Surreal<Any>, id: &str) -> Result<ProductDetail, AppError> {

@@ -1,22 +1,47 @@
 use surrealdb::types::{RecordId, SurrealValue};
 
 use crate::executor::Executor;
-use crate::models::product::{NewProduct, ProductChanges, ProductPage, ProductRecord, ProductSort};
+use crate::models::product::{
+    ActivePage, CountRow, NewProduct, ProductChanges, ProductPage, ProductRecord, ProductSort,
+};
 
-/// Produtos ativos, por nome ou do mais recente para o mais antigo (os sem data ficam no
-/// fim); o id desempata, para a ordem não oscilar. O `true` vai como parâmetro porque o
-/// `query_all` exige um.
+/// Uma página de produtos ativos, por nome ou do mais recente para o mais antigo (os sem
+/// data ficam no fim); o id desempata, para a ordem não oscilar entre páginas.
 pub async fn find_active(
     ex: &Executor<'_>,
     sort: ProductSort,
+    limit: i64,
+    offset: i64,
 ) -> surrealdb::Result<Vec<ProductRecord>> {
     let query = match sort {
-        ProductSort::Name => "SELECT * FROM product WHERE active = $active ORDER BY name, id",
+        ProductSort::Name => {
+            "SELECT * FROM product WHERE active = $page.active ORDER BY name, id \
+             LIMIT $page.limit START $page.offset"
+        }
         ProductSort::Newest => {
-            "SELECT * FROM product WHERE active = $active ORDER BY created_at DESC, id"
+            "SELECT * FROM product WHERE active = $page.active ORDER BY created_at DESC, id \
+             LIMIT $page.limit START $page.offset"
         }
     };
-    ex.query_all(query, "active", true).await
+    let page = ActivePage {
+        active: true,
+        limit,
+        offset,
+    };
+    ex.query_all(query, "page", page).await
+}
+
+/// Quantos produtos ativos existem, independente de página.
+pub async fn count_active(ex: &Executor<'_>) -> surrealdb::Result<i64> {
+    let rows: Vec<CountRow> = ex
+        .query_all(
+            "SELECT count() AS count FROM product WHERE active = $active GROUP ALL",
+            "active",
+            true,
+        )
+        .await?;
+    // Sem nenhum ativo o `GROUP ALL` pode não devolver linha nenhuma.
+    Ok(rows.first().map_or(0, |row| row.count))
 }
 
 pub async fn find_by_id(ex: &Executor<'_>, id: &str) -> surrealdb::Result<Option<ProductRecord>> {

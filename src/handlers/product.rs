@@ -1,7 +1,7 @@
 use axum::{
     Json,
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderName, StatusCode},
 };
 
 use crate::error::AppError;
@@ -13,12 +13,16 @@ use crate::models::product::{
 use crate::services::product as product_service;
 use crate::state::AppState;
 
+/// A lista simples no corpo (o formato de sempre) e o total de ativos no `X-Total-Count`.
 pub async fn list_products(
     State(state): State<AppState>,
     ValidatedQuery(query): ValidatedQuery<ListPublicProductsQuery>,
-) -> Result<Json<Vec<Product>>, AppError> {
-    let products = product_service::list_products(&state.db, query).await?;
-    Ok(Json(products))
+) -> Result<([(HeaderName, String); 1], Json<Vec<Product>>), AppError> {
+    let (products, total) = product_service::list_products(&state.db, query).await?;
+    Ok((
+        [(HeaderName::from_static("x-total-count"), total.to_string())],
+        Json(products),
+    ))
 }
 
 pub async fn get_product(

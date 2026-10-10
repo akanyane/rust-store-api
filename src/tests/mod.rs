@@ -13,7 +13,7 @@ mod sessions;
 use axum::{
     Router,
     body::Body,
-    http::{Request, StatusCode, header},
+    http::{HeaderMap, Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
@@ -44,13 +44,14 @@ pub struct Item {
     pub variant_id: String,
 }
 
-pub async fn send_raw(
+/// Como `send_raw`, mas devolve também os cabeçalhos da resposta.
+pub async fn send_full(
     router: &Router,
     method: &str,
     uri: &str,
     token: Option<&str>,
     body: Option<String>,
-) -> (StatusCode, Value) {
+) -> (StatusCode, HeaderMap, Value) {
     let mut builder = Request::builder().method(method).uri(uri);
     if let Some(token) = token {
         builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
@@ -64,6 +65,7 @@ pub async fn send_raw(
 
     let response = router.clone().oneshot(request).await.expect("response");
     let status = response.status();
+    let headers = response.headers().clone();
     let bytes = response
         .into_body()
         .collect()
@@ -75,6 +77,17 @@ pub async fn send_raw(
     } else {
         serde_json::from_slice(&bytes).unwrap_or(Value::Null)
     };
+    (status, headers, json)
+}
+
+pub async fn send_raw(
+    router: &Router,
+    method: &str,
+    uri: &str,
+    token: Option<&str>,
+    body: Option<String>,
+) -> (StatusCode, Value) {
+    let (status, _, json) = send_full(router, method, uri, token, body).await;
     (status, json)
 }
 

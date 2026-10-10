@@ -39,7 +39,7 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 | POST | `/auth/sign-in` | pública | Login; devolve `session_token` e `refresh_token` |
 | POST | `/auth/sign-out` | pública | Encerra a sessão a partir do `refresh_token` |
 | POST | `/auth/refresh` | pública | Troca um `refresh_token` por um par novo de tokens |
-| GET | `/products` | pública | Lista os produtos ativos (`?sort=name` ou `?sort=newest`) |
+| GET | `/products` | pública | Lista os produtos ativos (`?sort=`, `?limit=`, `?offset=`; total em `X-Total-Count`) |
 | POST | `/products` | admin | Cria produto |
 | GET | `/products/{id}` | pública | Detalha produto |
 | GET | `/products/{id}/variants` | pública | Lista variantes do produto |
@@ -135,9 +135,15 @@ Todo pedido traz `paid_at`: o instante em que ele virou `paid`, gravado pelo ban
 
 ## Ordem da listagem pública
 
-`GET /products` devolve todos os produtos ativos (sem paginação), por nome e, em empate, por id. Com `?sort=newest` vêm do mais recente para o mais antigo, e os produtos sem data de criação ficam no fim; `?sort=name` é o padrão. Valor desconhecido devolve `422`, e parâmetros que a rota não conhece são ignorados.
+`GET /products` devolve os produtos ativos por nome e, em empate, por id. Com `?sort=newest` vêm do mais recente para o mais antigo, e os produtos sem data de criação ficam no fim; `?sort=name` é o padrão. Valor de `sort` desconhecido devolve `422`, e parâmetros que a rota não conhece são ignorados.
 
 As variantes (`GET /products/{id}/variants`, o `variants` do detalhe público e o do detalhe de admin) vêm por nome e, em empate, por SKU (que é único, então a ordem é sempre a mesma). Não há `sort` nem paginação para elas. A ordem de texto diferencia maiúsculas de minúsculas (`Zed` vem antes de `alpha`), como na ordenação de produtos.
+
+## Paginação da listagem pública
+
+A paginação é **opcional**: sem `limit`, `GET /products` devolve todos os ativos, como sempre devolveu (não há limite padrão que corte o catálogo). Com `?limit=` (1 a 200) e `?offset=` (a partir de 0) a rota devolve uma página; só `offset` devolve o resto a partir dali. As páginas seguem a ordem de `sort` e nunca incluem produtos inativos. Valores inválidos devolvem `422`.
+
+O corpo continua sendo a lista simples, e o cabeçalho `X-Total-Count` traz quantos produtos ativos existem no total, independente da página (`0` se não houver nenhum). A contagem e a página são duas leituras separadas: se um produto for criado entre elas, o total pode ficar defasado em uma unidade.
 
 ## Data de criação do produto
 
