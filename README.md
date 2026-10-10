@@ -80,6 +80,14 @@ src/
 schema.surql        # definição das tabelas
 ```
 
+## Moeda
+
+A loja opera em **unidades** (singular: *unidade*), sempre números inteiros e sem subunidade. Os campos de valor são `price`, `unit_price`, `line_total` e `total` (ex.: `"price": 25` = 25 unidades). Toda a API responde em inglês.
+
+## Validação
+
+Os corpos JSON passam pelo extractor `ValidatedJson` (crate `validator`). Corpo malformado ou regra violada devolve `422` com `{"error": "campo: mensagem"}`, sem ecoar o valor enviado (LGPD). Regras: e-mail válido, nomes não vazios (máx. 100), preço e estoque não negativos, quantidade >= 1, data de nascimento fora do futuro, senha de 8 a 128 caracteres.
+
 ## Limitações conhecidas
 
-Pagamento, cancelamento de pedido com devolução de estoque, refresh de token, limpeza de sessões expiradas e validação de entrada ainda não foram implementados.
+Pagamento, cancelamento de pedido com devolução de estoque, refresh de token e limpeza de sessões expiradas ainda não foram implementados.

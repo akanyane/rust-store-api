@@ -7,7 +7,7 @@ DEFINE TABLE IF NOT EXISTS variant SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS product     ON variant TYPE record<product>;
 DEFINE FIELD IF NOT EXISTS name        ON variant TYPE string;
 DEFINE FIELD IF NOT EXISTS sku         ON variant TYPE string;
-DEFINE FIELD IF NOT EXISTS price_cents ON variant TYPE int ASSERT $value >= 0;
+DEFINE FIELD IF NOT EXISTS price ON variant TYPE int ASSERT $value >= 0;
 DEFINE FIELD IF NOT EXISTS stock       ON variant TYPE int ASSERT $value >= 0;
 DEFINE FIELD IF NOT EXISTS active      ON variant TYPE bool DEFAULT true;
 DEFINE INDEX IF NOT EXISTS variant_sku_unique ON variant FIELDS sku UNIQUE;
@@ -56,7 +56,7 @@ DEFINE INDEX IF NOT EXISTS cart_item_cart_variant_unique ON cart_item FIELDS car
 DEFINE TABLE IF NOT EXISTS order SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS customer    ON order TYPE record<customer>;
 DEFINE FIELD IF NOT EXISTS status      ON order TYPE string DEFAULT 'pending' ASSERT $value IN ['pending', 'paid', 'cancelled'];
-DEFINE FIELD IF NOT EXISTS total_cents ON order TYPE int ASSERT $value >= 0;
+DEFINE FIELD IF NOT EXISTS total ON order TYPE int ASSERT $value >= 0;
 DEFINE FIELD IF NOT EXISTS created_at  ON order TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS order_customer ON order FIELDS customer;
 
@@ -65,6 +65,6 @@ DEFINE FIELD IF NOT EXISTS order            ON order_item TYPE record<order>;
 DEFINE FIELD IF NOT EXISTS variant          ON order_item TYPE record<variant>;
 DEFINE FIELD IF NOT EXISTS name             ON order_item TYPE string;
 DEFINE FIELD IF NOT EXISTS sku              ON order_item TYPE string;
-DEFINE FIELD IF NOT EXISTS unit_price_cents ON order_item TYPE int ASSERT $value >= 0;
+DEFINE FIELD IF NOT EXISTS unit_price ON order_item TYPE int ASSERT $value >= 0;
 DEFINE FIELD IF NOT EXISTS quantity         ON order_item TYPE int ASSERT $value >= 1;
 DEFINE INDEX IF NOT EXISTS order_item_order ON order_item FIELDS order;

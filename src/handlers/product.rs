@@ -5,7 +5,7 @@ use axum::{
 };
 
 use crate::error::AppError;
-use crate::extractors::AuthAdmin;
+use crate::extractors::{AuthAdmin, ValidatedJson};
 use crate::models::product::{CreateProduct, Product, ProductDetail};
 use crate::services::product as product_service;
 use crate::state::AppState;
@@ -26,7 +26,7 @@ pub async fn get_product(
 pub async fn create_product(
     State(state): State<AppState>,
     _admin: AuthAdmin,
-    Json(input): Json<CreateProduct>,
+    ValidatedJson(input): ValidatedJson<CreateProduct>,
 ) -> Result<(StatusCode, Json<Product>), AppError> {
     let product = product_service::create_product(&state.db, input).await?;
     Ok((StatusCode::CREATED, Json(product)))

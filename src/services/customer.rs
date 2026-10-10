@@ -14,7 +14,7 @@ async fn email_of(ex: &Executor<'_>, id: &str) -> Result<String, AppError> {
     user_repo::find_by_id(ex, id)
         .await?
         .map(|user| user.email)
-        .ok_or_else(|| AppError::Internal("cliente sem user associado".to_string()))
+        .ok_or_else(|| AppError::Internal("customer without an associated user".to_string()))
 }
 
 async fn to_customer(ex: &Executor<'_>, record: CustomerRecord) -> Result<Customer, AppError> {
@@ -71,7 +71,7 @@ pub async fn delete_customer(db: &Surreal<Any>, id: &str) -> Result<(), AppError
         }
         Err(e) => {
             if let Err(cancel_err) = tx.cancel().await {
-                eprintln!("Falha ao cancelar transação: {cancel_err:?}");
+                eprintln!("Failed to roll back transaction: {cancel_err:?}");
             }
             Err(e)
         }
@@ -84,7 +84,7 @@ async fn delete_in_tx(ex: &Executor<'_>, id: &str) -> Result<(), AppError> {
     // Pedido é registro financeiro: o cliente dono de um não pode ser apagado.
     if order_repo::exists_by_customer(ex, customer.clone()).await? {
         return Err(AppError::Conflict(
-            "Cliente com pedidos não pode ser excluído".to_string(),
+            "A customer with orders cannot be deleted".to_string(),
         ));
     }
 

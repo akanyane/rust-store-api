@@ -32,10 +32,12 @@ async fn seed_admin(db: &Surreal<Any>) {
         (Some(email), Some(password)) => {
             auth_service::ensure_admin(db, &email, password)
                 .await
-                .unwrap_or_else(|e| panic!("falha ao preparar o admin: {e:?}"));
+                .unwrap_or_else(|e| panic!("failed to prepare admin: {e:?}"));
         }
-        (None, None) => println!("ADMIN_EMAIL e ADMIN_PASSWORD ausentes: a loja sobe sem admin"),
-        _ => panic!("defina ADMIN_EMAIL e ADMIN_PASSWORD juntos, ou nenhum dos dois"),
+        (None, None) => {
+            println!("ADMIN_EMAIL and ADMIN_PASSWORD not set: starting the store without an admin")
+        }
+        _ => panic!("set ADMIN_EMAIL and ADMIN_PASSWORD together, or neither"),
     }
 }
 
@@ -47,7 +49,7 @@ async fn main() {
     let port: u16 = std::env::var("PORT")
         .unwrap_or_else(|_| "3000".to_string())
         .parse()
-        .expect("PORT precisa ser um número entre 0 e 65535");
+        .expect("PORT must be a number between 0 and 65535");
 
     let db = db::connect_db().await.unwrap();
     seed_admin(&db).await;
@@ -90,6 +92,6 @@ async fn main() {
         .await
         .unwrap();
 
-    println!("Rust Store rodando em http://localhost:{port}");
+    println!("Rust Store running at http://localhost:{port}");
     axum::serve(listener, app).await.unwrap();
 }

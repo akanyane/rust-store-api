@@ -1,7 +1,10 @@
 use axum::{
-    extract::FromRequestParts,
+    Json,
+    extract::{FromRequest, FromRequestParts, Request},
     http::{header::AUTHORIZATION, request::Parts},
 };
+use serde::de::DeserializeOwned;
+use validator::{Validate, ValidationErrors};
 
 use crate::error::AppError;
 use crate::models::auth::Authenticated;
@@ -53,4 +56,46 @@ impl FromRequestParts<AppState> for AuthAdmin {
         }
         Ok(AuthAdmin)
     }
+}
+
+/// Replaces `Json<T>` and validates the body with `#[derive(Validate)]`. Answers 422
+/// in the standard API format, without the serde text and without echoing the
+/// submitted values (the body may contain personal data).
+pub struct ValidatedJson<T>(pub T);
+
+impl<T, S> FromRequest<S> for ValidatedJson<T>
+where
+    T: DeserializeOwned + Validate,
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let Json(value) = Json::<T>::from_request(req, state)
+            .await
+            .map_err(|_| AppError::Validation("Invalid request body".to_string()))?;
+
+        value
+            .validate()
+            .map_err(|errors| AppError::Validation(describe_errors(&errors)))?;
+
+        Ok(ValidatedJson(value))
+    }
+}
+
+/// One sentence per field, alphabetically: `field: message`.
+fn describe_errors(errors: &ValidationErrors) -> String {
+    let mut lines: Vec<String> = errors
+        .field_errors()
+        .into_iter()
+        .map(|(field, field_errors)| {
+            let message = field_errors
+                .first()
+                .and_then(|e| e.message.as_deref())
+                .unwrap_or("invalid value");
+            format!("{field}: {message}")
+        })
+        .collect();
+    lines.sort();
+    lines.join("; ")
 }

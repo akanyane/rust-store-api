@@ -36,7 +36,7 @@ pub async fn create_product(db: &Surreal<Any>, input: CreateProduct) -> Result<P
         }
         Err(e) => {
             if let Err(cancel_err) = tx.cancel().await {
-                eprintln!("Falha ao cancelar transação: {cancel_err:?}");
+                eprintln!("Failed to roll back transaction: {cancel_err:?}");
             }
             Err(e)
         }
@@ -54,13 +54,13 @@ async fn insert_product_with_default_variant(
 
     let product = product_repo::create(ex, new_product)
         .await?
-        .ok_or(AppError::Internal("falha ao criar produto".to_string()))?;
+        .ok_or(AppError::Internal("failed to create product".to_string()))?;
 
     let default_variant = NewVariant {
         product: product.id.clone(),
-        name: "Padrão".to_string(),
+        name: "Default".to_string(),
         sku: format!("SKU-{}", id_to_string(&product.id)),
-        price_cents: input.price_cents,
+        price: input.price,
         stock: input.stock,
     };
 

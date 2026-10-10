@@ -27,7 +27,7 @@ pub async fn create_variant(
 
     if variant_repo::exists_by_sku(&ex, &input.sku).await? {
         return Err(AppError::Conflict(format!(
-            "Já existe uma variante com o SKU '{}'",
+            "A variant with SKU '{}' already exists",
             input.sku
         )));
     }
@@ -36,13 +36,13 @@ pub async fn create_variant(
         product: product.id,
         name: input.name,
         sku: input.sku,
-        price_cents: input.price_cents,
+        price: input.price,
         stock: input.stock,
     };
 
     let record = variant_repo::create(&ex, new_variant)
         .await?
-        .ok_or(AppError::Internal("falha ao criar variante".to_string()))?;
+        .ok_or(AppError::Internal("failed to create variant".to_string()))?;
 
     Ok(Variant::from(record))
 }

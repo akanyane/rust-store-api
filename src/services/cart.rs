@@ -16,7 +16,7 @@ use crate::repositories::{
 fn ensure_valid_quantity(quantity: i32) -> Result<(), AppError> {
     if quantity < 1 {
         return Err(AppError::Validation(
-            "A quantidade deve ser pelo menos 1".to_string(),
+            "Quantity must be at least 1".to_string(),
         ));
     }
     Ok(())
@@ -24,11 +24,11 @@ fn ensure_valid_quantity(quantity: i32) -> Result<(), AppError> {
 
 fn ensure_purchasable(variant: &VariantRecord, quantity: i32) -> Result<(), AppError> {
     if !variant.active {
-        return Err(AppError::Conflict("Variante indisponível".to_string()));
+        return Err(AppError::Conflict("Variant unavailable".to_string()));
     }
     if quantity > variant.stock {
         return Err(AppError::Conflict(format!(
-            "Estoque insuficiente: restam {} unidade(s)",
+            "Insufficient stock: {} item(s) left",
             variant.stock
         )));
     }
@@ -54,39 +54,35 @@ async fn build_view(ex: &Executor<'_>, cart: RecordId) -> Result<CartView, AppEr
         .map(|variant| (id_to_string(&variant.id), variant))
         .collect();
 
-    let overflow = || AppError::Internal("overflow no cálculo do carrinho".to_string());
+    let overflow = || AppError::Internal("overflow computing cart".to_string());
     let mut views = Vec::with_capacity(items.len());
-    let mut total_cents: i64 = 0;
+    let mut total: i64 = 0;
 
     for item in items {
         let variant = variants
             .get(&id_to_string(&item.variant))
-            .ok_or(AppError::Internal(
-                "variante do carrinho não encontrada".to_string(),
-            ))?;
+            .ok_or(AppError::Internal("cart variant not found".to_string()))?;
 
-        let line_total_cents = variant
-            .price_cents
+        let line_total = variant
+            .price
             .checked_mul(i64::from(item.quantity))
             .ok_or_else(overflow)?;
-        total_cents = total_cents
-            .checked_add(line_total_cents)
-            .ok_or_else(overflow)?;
+        total = total.checked_add(line_total).ok_or_else(overflow)?;
 
         views.push(CartItemView {
             variant_id: id_to_string(&variant.id),
             product_id: id_to_string(&variant.product),
             name: variant.name.clone(),
             sku: variant.sku.clone(),
-            unit_price_cents: variant.price_cents,
+            unit_price: variant.price,
             quantity: item.quantity,
-            line_total_cents,
+            line_total,
         });
     }
 
     Ok(CartView {
         items: views,
-        total_cents,
+        total,
     })
 }
 
@@ -124,7 +120,7 @@ pub async fn add_item(
         }
         Err(e) => {
             if let Err(cancel_err) = tx.cancel().await {
-                eprintln!("Falha ao cancelar transação: {cancel_err:?}");
+                eprintln!("Failed to roll back transaction: {cancel_err:?}");
             }
             return Err(e);
         }
@@ -149,14 +145,14 @@ async fn add_item_in_tx(
         Some(cart) => cart,
         None => cart_repo::create(ex, NewCart { customer })
             .await?
-            .ok_or(AppError::Internal("falha ao criar carrinho".to_string()))?,
+            .ok_or(AppError::Internal("failed to create cart".to_string()))?,
     };
 
     let existing = cart_item_repo::find_one(ex, cart.id.clone(), &variant.id).await?;
     let current = existing.as_ref().map_or(0, |item| item.quantity);
     let new_quantity = current
         .checked_add(quantity)
-        .ok_or(AppError::Validation("Quantidade inválida".to_string()))?;
+        .ok_or(AppError::Validation("Invalid quantity".to_string()))?;
 
     ensure_purchasable(&variant, new_quantity)?;
 
@@ -170,7 +166,7 @@ async fn add_item_in_tx(
         Some(item) => cart_item_repo::update(ex, item.id, data).await?,
         None => cart_item_repo::create(ex, data).await?,
     }
-    .ok_or(AppError::Internal("falha ao gravar item".to_string()))?;
+    .ok_or(AppError::Internal("failed to save item".to_string()))?;
 
     Ok(cart.id)
 }

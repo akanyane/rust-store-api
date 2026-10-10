@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue};
+use validator::Validate;
 
 use super::id_to_string;
 use super::variant::Variant;
@@ -41,11 +42,21 @@ impl ProductDetail {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct CreateProduct {
+    #[validate(
+        custom(
+            function = "crate::models::validate_not_blank",
+            message = "must not be blank"
+        ),
+        length(max = 200, message = "at most 200 characters")
+    )]
     pub name: String,
+    #[validate(length(max = 2000, message = "at most 2000 characters"))]
     pub description: String,
-    pub price_cents: i64,
+    #[validate(range(min = 0, message = "must not be negative"))]
+    pub price: i64,
+    #[validate(range(min = 0, message = "must not be negative"))]
     pub stock: i32,
 }
 

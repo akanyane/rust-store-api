@@ -4,7 +4,7 @@ use axum::{
 };
 
 use crate::error::AppError;
-use crate::extractors::AuthCustomer;
+use crate::extractors::{AuthCustomer, ValidatedJson};
 use crate::models::cart::CartView;
 use crate::models::cart_item::{AddCartItem, UpdateCartItem};
 use crate::services::cart as cart_service;
@@ -21,7 +21,7 @@ pub async fn get_cart(
 pub async fn add_item(
     State(state): State<AppState>,
     AuthCustomer(customer_id): AuthCustomer,
-    Json(input): Json<AddCartItem>,
+    ValidatedJson(input): ValidatedJson<AddCartItem>,
 ) -> Result<Json<CartView>, AppError> {
     let cart = cart_service::add_item(&state.db, &customer_id, input).await?;
     Ok(Json(cart))
@@ -31,7 +31,7 @@ pub async fn update_item(
     State(state): State<AppState>,
     AuthCustomer(customer_id): AuthCustomer,
     Path(variant_id): Path<String>,
-    Json(input): Json<UpdateCartItem>,
+    ValidatedJson(input): ValidatedJson<UpdateCartItem>,
 ) -> Result<Json<CartView>, AppError> {
     let cart = cart_service::update_item(&state.db, &customer_id, &variant_id, input).await?;
     Ok(Json(cart))

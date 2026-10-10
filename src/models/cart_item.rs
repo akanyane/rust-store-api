@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use surrealdb::types::{RecordId, SurrealValue};
+use validator::Validate;
 
 #[derive(Debug, Clone, SurrealValue)]
 pub struct CartItemRecord {
@@ -9,14 +10,16 @@ pub struct CartItemRecord {
     pub quantity: i32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct AddCartItem {
     pub variant_id: String,
+    #[validate(range(min = 1, message = "must be at least 1"))]
     pub quantity: i32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct UpdateCartItem {
+    #[validate(range(min = 1, message = "must be at least 1"))]
     pub quantity: i32,
 }
 

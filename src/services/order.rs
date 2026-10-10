@@ -18,38 +18,37 @@ use crate::repositories::{
 };
 
 fn empty_cart() -> AppError {
-    AppError::Conflict("O carrinho está vazio".to_string())
+    AppError::Conflict("The cart is empty".to_string())
 }
 
 fn build_view(order: OrderRecord, items: Vec<OrderItemRecord>) -> Result<OrderView, AppError> {
     let items = items
         .into_iter()
         .map(|item| {
-            OrderItemView::from_record(item).ok_or_else(|| {
-                AppError::Internal("overflow no total de item do pedido".to_string())
-            })
+            OrderItemView::from_record(item)
+                .ok_or_else(|| AppError::Internal("overflow in order item total".to_string()))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(OrderView {
         id: id_to_string(&order.id),
         status: order.status,
-        total_cents: order.total_cents,
+        total: order.total,
         created_at: DateTime::<Utc>::from(order.created_at),
         items,
     })
 }
 
-fn total_cents(lines: &[(VariantRecord, i32)]) -> Result<i64, AppError> {
+fn order_total(lines: &[(VariantRecord, i32)]) -> Result<i64, AppError> {
     lines
         .iter()
         .try_fold(0_i64, |total, (variant, quantity)| {
             variant
-                .price_cents
+                .price
                 .checked_mul(i64::from(*quantity))
                 .and_then(|line| total.checked_add(line))
         })
-        .ok_or_else(|| AppError::Internal("overflow no total do pedido".to_string()))
+        .ok_or_else(|| AppError::Internal("overflow in order total".to_string()))
 }
 
 /// Transforma o carrinho do cliente em pedido. Tudo numa transação: se qualquer
@@ -65,7 +64,7 @@ pub async fn checkout(db: &Surreal<Any>, customer_id: &str) -> Result<OrderView,
         }
         Err(e) => {
             if let Err(cancel_err) = tx.cancel().await {
-                eprintln!("Falha ao cancelar transação: {cancel_err:?}");
+                eprintln!("Failed to roll back transaction: {cancel_err:?}");
             }
             Err(e)
         }
@@ -86,17 +85,17 @@ async fn checkout_in_tx(ex: &Executor<'_>, customer_id: &str) -> Result<OrderVie
     }
 
     let lines = reserve_stock(ex, &cart_items).await?;
-    let total = total_cents(&lines)?;
+    let total = order_total(&lines)?;
 
     let order = order_repo::create(
         ex,
         NewOrder {
             customer: customer.id,
-            total_cents: total,
+            total,
         },
     )
     .await?
-    .ok_or_else(|| AppError::Internal("falha ao criar pedido".to_string()))?;
+    .ok_or_else(|| AppError::Internal("failed to create order".to_string()))?;
 
     let mut items = Vec::with_capacity(lines.len());
     for (variant, quantity) in lines {
@@ -107,12 +106,12 @@ async fn checkout_in_tx(ex: &Executor<'_>, customer_id: &str) -> Result<OrderVie
                 variant: variant.id,
                 name: variant.name,
                 sku: variant.sku,
-                unit_price_cents: variant.price_cents,
+                unit_price: variant.price,
                 quantity,
             },
         )
         .await?
-        .ok_or_else(|| AppError::Internal("falha ao criar item do pedido".to_string()))?;
+        .ok_or_else(|| AppError::Internal("failed to create order item".to_string()))?;
         items.push(item);
     }
 
@@ -150,23 +149,21 @@ async fn reserve_stock(
     for item in cart_items {
         let variant = variants
             .get(&id_to_string(&item.variant))
-            .ok_or_else(|| AppError::Internal("variante do carrinho não encontrada".to_string()))?;
+            .ok_or_else(|| AppError::Internal("cart variant not found".to_string()))?;
 
         let product_active = products
             .get(&id_to_string(&variant.product))
             .is_some_and(|product| product.active);
         if !variant.active || !product_active {
             return Err(AppError::Conflict(format!(
-                "Item indisponível: {}",
+                "Item unavailable: {}",
                 variant.sku
             )));
         }
 
         let updated = variant_repo::decrement_stock(ex, item.variant.clone(), item.quantity)
             .await?
-            .ok_or_else(|| {
-                AppError::Conflict(format!("Estoque insuficiente para {}", variant.sku))
-            })?;
+            .ok_or_else(|| AppError::Conflict(format!("Insufficient stock for {}", variant.sku)))?;
         lines.push((updated, item.quantity));
     }
 

@@ -1,6 +1,7 @@
 use axum::{Json, extract::State, http::StatusCode};
 
 use crate::error::AppError;
+use crate::extractors::ValidatedJson;
 use crate::models::auth::{AuthResponse, SignIn, SignOut, SignUp, TokenPair};
 use crate::models::customer::Customer;
 use crate::services::auth as auth_service;
@@ -8,7 +9,7 @@ use crate::state::AppState;
 
 pub async fn sign_up(
     State(state): State<AppState>,
-    Json(input): Json<SignUp>,
+    ValidatedJson(input): ValidatedJson<SignUp>,
 ) -> Result<(StatusCode, Json<Customer>), AppError> {
     let customer = auth_service::sign_up(&state.db, input).await?;
     Ok((StatusCode::CREATED, Json(customer)))
@@ -16,7 +17,7 @@ pub async fn sign_up(
 
 pub async fn sign_in(
     State(state): State<AppState>,
-    Json(input): Json<SignIn>,
+    ValidatedJson(input): ValidatedJson<SignIn>,
 ) -> Result<Json<AuthResponse>, AppError> {
     let TokenPair {
         session_token,
@@ -32,7 +33,7 @@ pub async fn sign_in(
 
 pub async fn sign_out(
     State(state): State<AppState>,
-    Json(input): Json<SignOut>,
+    ValidatedJson(input): ValidatedJson<SignOut>,
 ) -> Result<StatusCode, AppError> {
     auth_service::sign_out(&state.db, &input.refresh_token).await?;
     Ok(StatusCode::NO_CONTENT)

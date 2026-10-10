@@ -25,33 +25,30 @@ impl From<surrealdb::Error> for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match self {
-            AppError::NotFound => (StatusCode::NOT_FOUND, "Recurso não encontrado".to_string()),
+            AppError::NotFound => (StatusCode::NOT_FOUND, "Resource not found".to_string()),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg),
             AppError::Validation(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg),
             // Mensagem única de propósito: não revela se o e-mail existe.
-            AppError::Unauthorized => (
-                StatusCode::UNAUTHORIZED,
-                "Credenciais inválidas".to_string(),
-            ),
-            AppError::Forbidden => (StatusCode::FORBIDDEN, "Acesso negado".to_string()),
+            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Invalid credentials".to_string()),
+            AppError::Forbidden => (StatusCode::FORBIDDEN, "Access denied".to_string()),
             AppError::Internal(msg) => {
-                eprintln!("Erro interno: {msg}");
+                eprintln!("Internal error: {msg}");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "Erro interno".to_string(),
+                    "Internal error".to_string(),
                 )
             }
             AppError::Database(e) => {
                 // A mensagem do banco pode conter dados pessoais (ex.: o e-mail
                 // inválido). Em release ela é omitida; em debug os dados são fictícios.
                 if cfg!(debug_assertions) {
-                    eprintln!("Erro no banco: {e:?}");
+                    eprintln!("Database error: {e:?}");
                 } else {
-                    eprintln!("Erro no banco (detalhes omitidos: podem conter dados pessoais)");
+                    eprintln!("Database error (details omitted: may contain personal data)");
                 }
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "Erro interno".to_string(),
+                    "Internal error".to_string(),
                 )
             }
         };

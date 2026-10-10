@@ -9,7 +9,7 @@ pub struct OrderRecord {
     pub id: RecordId,
     pub customer: RecordId,
     pub status: String,
-    pub total_cents: i64,
+    pub total: i64,
     pub created_at: Datetime,
 }
 
@@ -17,7 +17,7 @@ pub struct OrderRecord {
 #[derive(Debug, SurrealValue)]
 pub struct NewOrder {
     pub customer: RecordId,
-    pub total_cents: i64,
+    pub total: i64,
 }
 
 #[derive(Debug, Clone, SurrealValue)]
@@ -27,7 +27,7 @@ pub struct OrderItemRecord {
     pub variant: RecordId,
     pub name: String,
     pub sku: String,
-    pub unit_price_cents: i64,
+    pub unit_price: i64,
     pub quantity: i32,
 }
 
@@ -37,7 +37,7 @@ pub struct NewOrderItem {
     pub variant: RecordId,
     pub name: String,
     pub sku: String,
-    pub unit_price_cents: i64,
+    pub unit_price: i64,
     pub quantity: i32,
 }
 
@@ -45,7 +45,7 @@ pub struct NewOrderItem {
 pub struct OrderView {
     pub id: String,
     pub status: String,
-    pub total_cents: i64,
+    pub total: i64,
     pub created_at: DateTime<Utc>,
     pub items: Vec<OrderItemView>,
 }
@@ -55,25 +55,23 @@ pub struct OrderItemView {
     pub variant_id: String,
     pub name: String,
     pub sku: String,
-    pub unit_price_cents: i64,
+    pub unit_price: i64,
     pub quantity: i32,
-    pub line_total_cents: i64,
+    pub line_total: i64,
 }
 
 impl OrderItemView {
     /// `None` só se o total da linha estourar `i64`, o que o checkout já impede.
     pub fn from_record(record: OrderItemRecord) -> Option<Self> {
-        let line_total_cents = record
-            .unit_price_cents
-            .checked_mul(i64::from(record.quantity))?;
+        let line_total = record.unit_price.checked_mul(i64::from(record.quantity))?;
 
         Some(OrderItemView {
             variant_id: id_to_string(&record.variant),
             name: record.name,
             sku: record.sku,
-            unit_price_cents: record.unit_price_cents,
+            unit_price: record.unit_price,
             quantity: record.quantity,
-            line_total_cents,
+            line_total,
         })
     }
 }

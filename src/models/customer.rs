@@ -1,6 +1,7 @@
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue};
+use validator::Validate;
 
 use super::id_to_string;
 
@@ -23,10 +24,28 @@ pub struct Customer {
 }
 
 /// Usado na substituição completa (PUT). O cadastro é feito por `sign-up`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct UpdateCustomer {
+    #[validate(
+        custom(
+            function = "crate::models::validate_not_blank",
+            message = "must not be blank"
+        ),
+        length(max = 100, message = "at most 100 characters")
+    )]
     pub first_name: String,
+    #[validate(
+        custom(
+            function = "crate::models::validate_not_blank",
+            message = "must not be blank"
+        ),
+        length(max = 100, message = "at most 100 characters")
+    )]
     pub last_name: String,
+    #[validate(custom(
+        function = "crate::models::validate_not_future",
+        message = "must not be in the future"
+    ))]
     pub birthday: NaiveDate,
 }
 

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, SurrealValue};
+use validator::Validate;
 
 use super::id_to_string;
 
@@ -9,7 +10,7 @@ pub struct VariantRecord {
     pub product: RecordId,
     pub name: String,
     pub sku: String,
-    pub price_cents: i64,
+    pub price: i64,
     pub stock: i32,
     pub active: bool,
 }
@@ -20,16 +21,32 @@ pub struct Variant {
     pub product_id: String,
     pub name: String,
     pub sku: String,
-    pub price_cents: i64,
+    pub price: i64,
     pub stock: i32,
     pub active: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct CreateVariant {
+    #[validate(
+        custom(
+            function = "crate::models::validate_not_blank",
+            message = "must not be blank"
+        ),
+        length(max = 200, message = "at most 200 characters")
+    )]
     pub name: String,
+    #[validate(
+        custom(
+            function = "crate::models::validate_not_blank",
+            message = "must not be blank"
+        ),
+        length(max = 64, message = "at most 64 characters")
+    )]
     pub sku: String,
-    pub price_cents: i64,
+    #[validate(range(min = 0, message = "must not be negative"))]
+    pub price: i64,
+    #[validate(range(min = 0, message = "must not be negative"))]
     pub stock: i32,
 }
 
@@ -38,7 +55,7 @@ pub struct NewVariant {
     pub product: RecordId,
     pub name: String,
     pub sku: String,
-    pub price_cents: i64,
+    pub price: i64,
     pub stock: i32,
 }
 
@@ -49,7 +66,7 @@ impl From<VariantRecord> for Variant {
             product_id: id_to_string(&record.product),
             name: record.name,
             sku: record.sku,
-            price_cents: record.price_cents,
+            price: record.price,
             stock: record.stock,
             active: record.active,
         }

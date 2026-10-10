@@ -16,7 +16,7 @@ pub struct NewCart {
 #[derive(Debug, Serialize)]
 pub struct CartView {
     pub items: Vec<CartItemView>,
-    pub total_cents: i64,
+    pub total: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -25,16 +25,16 @@ pub struct CartItemView {
     pub product_id: String,
     pub name: String,
     pub sku: String,
-    pub unit_price_cents: i64,
+    pub unit_price: i64,
     pub quantity: i32,
-    pub line_total_cents: i64,
+    pub line_total: i64,
 }
 
 impl CartView {
     pub fn empty() -> Self {
         CartView {
             items: Vec::new(),
-            total_cents: 0,
+            total: 0,
         }
     }
 }

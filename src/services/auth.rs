@@ -14,7 +14,7 @@ use crate::models::session::NewSession;
 use crate::models::user::{NewUser, ROLE_ADMIN, ROLE_CUSTOMER};
 use crate::repositories::{customer as customer_repo, session as session_repo, user as user_repo};
 
-const EMAIL_IN_USE: &str = "Já existe uma conta com este e-mail";
+const EMAIL_IN_USE: &str = "An account with this email already exists";
 const MIN_PASSWORD_LEN: usize = 8;
 // Limite superior para ninguém mandar uma senha gigante só para gastar CPU no argon2.
 const MAX_PASSWORD_LEN: usize = 128;
@@ -29,7 +29,7 @@ fn ensure_valid_password(password: &str) -> Result<(), AppError> {
     let len = password.chars().count();
     if !(MIN_PASSWORD_LEN..=MAX_PASSWORD_LEN).contains(&len) {
         return Err(AppError::Validation(format!(
-            "A senha deve ter entre {MIN_PASSWORD_LEN} e {MAX_PASSWORD_LEN} caracteres"
+            "Password must be between {MIN_PASSWORD_LEN} and {MAX_PASSWORD_LEN} characters"
         )));
     }
     Ok(())
@@ -56,7 +56,7 @@ fn hash_password_blocking(password: &str) -> Result<String, AppError> {
     Argon2::default()
         .hash_password(password.as_bytes())
         .map(|hash| hash.to_string())
-        .map_err(|e| AppError::Internal(format!("falha ao gerar hash da senha: {e}")))
+        .map_err(|e| AppError::Internal(format!("failed to hash password: {e}")))
 }
 
 /// Hash de uma senha qualquer, usado quando o e-mail não existe. Assim o sign-in
@@ -65,8 +65,8 @@ fn hash_password_blocking(password: &str) -> Result<String, AppError> {
 fn dummy_hash() -> &'static str {
     static DUMMY: OnceLock<String> = OnceLock::new();
     DUMMY.get_or_init(|| {
-        hash_password_blocking("senha-descartavel")
-            .unwrap_or_else(|_| panic!("falha ao gerar o hash de apoio do sign-in"))
+        hash_password_blocking("throwaway-password")
+            .unwrap_or_else(|_| panic!("failed to generate the sign-in dummy hash"))
     })
 }
 
@@ -74,7 +74,7 @@ fn dummy_hash() -> &'static str {
 async fn hash_password(password: String) -> Result<String, AppError> {
     tokio::task::spawn_blocking(move || hash_password_blocking(&password))
         .await
-        .map_err(|e| AppError::Internal(format!("tarefa de hash falhou: {e}")))?
+        .map_err(|e| AppError::Internal(format!("hash task failed: {e}")))?
 }
 
 async fn verify_password(password: String, hash: Option<String>) -> Result<bool, AppError> {
@@ -88,7 +88,7 @@ async fn verify_password(password: String, hash: Option<String>) -> Result<bool,
         }
     })
     .await
-    .map_err(|e| AppError::Internal(format!("tarefa de verificação falhou: {e}")))
+    .map_err(|e| AppError::Internal(format!("verification task failed: {e}")))
 }
 
 pub async fn sign_up(db: &Surreal<Any>, input: SignUp) -> Result<Customer, AppError> {
@@ -123,7 +123,7 @@ pub async fn sign_up(db: &Surreal<Any>, input: SignUp) -> Result<Customer, AppEr
         }
         Err(e) => {
             if let Err(cancel_err) = tx.cancel().await {
-                eprintln!("Falha ao cancelar transação: {cancel_err:?}");
+                eprintln!("Failed to roll back transaction: {cancel_err:?}");
             }
             return Err(e);
         }
@@ -140,11 +140,11 @@ async fn sign_up_in_tx(
 ) -> Result<CustomerRecord, AppError> {
     let user = user_repo::create(ex, user)
         .await?
-        .ok_or_else(|| AppError::Internal("falha ao criar user".to_string()))?;
+        .ok_or_else(|| AppError::Internal("failed to create user".to_string()))?;
 
     customer_repo::create(ex, &id_to_string(&user.id), profile)
         .await?
-        .ok_or_else(|| AppError::Internal("falha ao criar cliente".to_string()))
+        .ok_or_else(|| AppError::Internal("failed to create customer".to_string()))
 }
 
 pub async fn sign_in(db: &Surreal<Any>, input: SignIn) -> Result<TokenPair, AppError> {
@@ -180,7 +180,7 @@ pub async fn sign_in(db: &Surreal<Any>, input: SignIn) -> Result<TokenPair, AppE
         },
     )
     .await?
-    .ok_or_else(|| AppError::Internal("falha ao criar sessão".to_string()))?;
+    .ok_or_else(|| AppError::Internal("failed to create session".to_string()))?;
 
     Ok(tokens)
 }
@@ -219,7 +219,7 @@ pub async fn ensure_admin(
 
     if let Some(existing) = user_repo::find_by_email(&ex, &email).await? {
         if existing.role != ROLE_ADMIN {
-            eprintln!("ADMIN_EMAIL já pertence a um usuário comum: ele NÃO foi promovido a admin");
+            eprintln!("ADMIN_EMAIL belongs to a regular user: it was NOT promoted to admin");
         }
         return Ok(());
     }
@@ -234,9 +234,9 @@ pub async fn ensure_admin(
         },
     )
     .await?
-    .ok_or_else(|| AppError::Internal("falha ao criar admin".to_string()))?;
+    .ok_or_else(|| AppError::Internal("failed to create admin".to_string()))?;
 
-    println!("Usuário admin criado");
+    println!("Admin user created");
     Ok(())
 }
 
