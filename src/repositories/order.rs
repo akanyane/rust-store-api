@@ -34,3 +34,20 @@ pub async fn exists_by_customer(ex: &Executor<'_>, customer: RecordId) -> surrea
         .await?;
     Ok(!rows.is_empty())
 }
+
+/// Marca como cancelado só se ainda estiver `pending`. A checagem e a troca são um
+/// único comando, então dois cancelamentos simultâneos não passam os dois.
+/// Devolve `None` quando o pedido não estava pendente (nada foi alterado).
+pub async fn cancel_if_pending(
+    ex: &Executor<'_>,
+    id: RecordId,
+) -> surrealdb::Result<Option<OrderRecord>> {
+    let rows: Vec<OrderRecord> = ex
+        .query_all(
+            "UPDATE $id SET status = 'cancelled' WHERE status = 'pending'",
+            "id",
+            id,
+        )
+        .await?;
+    Ok(rows.into_iter().next())
+}

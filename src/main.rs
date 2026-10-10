@@ -86,6 +86,7 @@ async fn main() {
             get(order_handlers::list_orders).post(order_handlers::checkout),
         )
         .route("/orders/{id}", get(order_handlers::get_order))
+        .route("/orders/{id}/cancel", post(order_handlers::cancel_order))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))

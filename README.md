@@ -50,6 +50,7 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 | GET | `/orders` | cliente | Lista os pedidos do cliente |
 | POST | `/orders` | cliente | Checkout do carrinho |
 | GET | `/orders/{id}` | cliente | Detalha um pedido do cliente |
+| POST | `/orders/{id}/cancel` | cliente | Cancela um pedido pendente e devolve o estoque |
 
 ## Autenticação
 
@@ -90,4 +91,4 @@ Os corpos JSON passam pelo extractor `ValidatedJson` (crate `validator`). Corpo 
 
 ## Limitações conhecidas
 
-Pagamento, cancelamento de pedido com devolução de estoque, refresh de token e limpeza de sessões expiradas ainda não foram implementados.
+Pagamento, refresh de token e limpeza de sessões expiradas ainda não foram implementados.

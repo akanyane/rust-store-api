@@ -73,3 +73,19 @@ pub async fn exists_by_sku(ex: &Executor<'_>, sku: &str) -> surrealdb::Result<bo
         .await?;
     Ok(!rows.is_empty())
 }
+
+/// Devolve unidades ao estoque (ex.: pedido cancelado).
+pub async fn increment_stock(
+    ex: &Executor<'_>,
+    id: RecordId,
+    quantity: i32,
+) -> surrealdb::Result<Option<VariantRecord>> {
+    let rows: Vec<VariantRecord> = ex
+        .query_all(
+            "UPDATE $change.id SET stock += $change.quantity",
+            "change",
+            StockChange { id, quantity },
+        )
+        .await?;
+    Ok(rows.into_iter().next())
+}

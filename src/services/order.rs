@@ -215,3 +215,55 @@ pub async fn get_order(
     let items = order_item_repo::find_by_orders(&ex, vec![order.id.clone()]).await?;
     build_view(order, items)
 }
+
+/// Cancela um pedido pendente e devolve o estoque dos itens, tudo numa transação.
+pub async fn cancel_order(
+    db: &Surreal<Any>,
+    customer_id: &str,
+    order_id: &str,
+) -> Result<OrderView, AppError> {
+    let tx = db.clone().begin().await?;
+    let result = cancel_order_in_tx(&Executor::Tx(&tx), customer_id, order_id).await;
+
+    match result {
+        Ok(view) => {
+            tx.commit().await?;
+            Ok(view)
+        }
+        Err(e) => {
+            if let Err(cancel_err) = tx.cancel().await {
+                eprintln!("Failed to roll back transaction: {cancel_err:?}");
+            }
+            Err(e)
+        }
+    }
+}
+
+async fn cancel_order_in_tx(
+    ex: &Executor<'_>,
+    customer_id: &str,
+    order_id: &str,
+) -> Result<OrderView, AppError> {
+    let order = order_repo::find_by_id(ex, order_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    // Pedido de outro cliente aparece como inexistente, para não revelar que existe.
+    if id_to_string(&order.customer) != customer_id {
+        return Err(AppError::NotFound);
+    }
+
+    let cancelled = order_repo::cancel_if_pending(ex, order.id.clone())
+        .await?
+        .ok_or_else(|| AppError::Conflict("Only pending orders can be cancelled".to_string()))?;
+
+    let items = order_item_repo::find_by_orders(ex, vec![cancelled.id.clone()]).await?;
+    for item in &items {
+        // Devolve o estoque mesmo se a variante estiver inativa: as unidades existem.
+        variant_repo::increment_stock(ex, item.variant.clone(), item.quantity)
+            .await?
+            .ok_or_else(|| AppError::Internal("order variant not found".to_string()))?;
+    }
+
+    build_view(cancelled, items)
+}
