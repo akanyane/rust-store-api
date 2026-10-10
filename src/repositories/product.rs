@@ -16,7 +16,7 @@ pub async fn find_active(
 ) -> surrealdb::Result<Vec<ProductRecord>> {
     let query = match sort {
         ProductSort::Name => {
-            "SELECT * FROM product WHERE active = $page.active ORDER BY name, id \
+            "SELECT * FROM product WHERE active = $page.active ORDER BY name COLLATE, id \
              LIMIT $page.limit START $page.offset"
         }
         ProductSort::Newest => {
@@ -111,7 +111,7 @@ pub async fn find_page(
     let query = match sort {
         ProductSort::Name => {
             "SELECT * FROM product WHERE ($page.active = NONE OR active = $page.active) \
-             ORDER BY name, id LIMIT $page.limit START $page.offset"
+             ORDER BY name COLLATE, id LIMIT $page.limit START $page.offset"
         }
         ProductSort::Newest => {
             "SELECT * FROM product WHERE ($page.active = NONE OR active = $page.active) \

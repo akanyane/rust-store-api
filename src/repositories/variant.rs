@@ -59,7 +59,7 @@ pub async fn find_by_product(
     product: RecordId,
 ) -> surrealdb::Result<Vec<VariantRecord>> {
     ex.query_all(
-        "SELECT * FROM variant WHERE product = $product ORDER BY name, sku",
+        "SELECT * FROM variant WHERE product = $product ORDER BY name COLLATE, sku",
         "product",
         product,
     )

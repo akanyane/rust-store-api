@@ -614,3 +614,41 @@ async fn the_admin_total_is_zero_not_missing_when_nothing_matches() {
         (Some("1".into()), 1)
     );
 }
+
+#[tokio::test]
+async fn the_admin_list_sorts_text_ignoring_case_and_accents() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    for name in ["zebra", "Zed", "alpha", "Beta", "Álamo", "charlie"] {
+        app.setup_product(&admin, name, 10, 5).await;
+    }
+    let sorted = ["Álamo", "alpha", "Beta", "charlie", "zebra", "Zed"];
+    let list = |query: &'static str| {
+        let app = &app;
+        let admin = admin.clone();
+        async move {
+            let (status, body) = app
+                .send(
+                    "GET",
+                    &format!("/admin/products{query}"),
+                    Some(&admin),
+                    None,
+                )
+                .await;
+            assert_eq!(status, StatusCode::OK, "{query}");
+            names(&body)
+        }
+    };
+
+    assert_eq!(list("").await, sorted);
+    assert_eq!(list("?sort=name").await, sorted);
+    assert_eq!(list("?limit=2").await, ["Álamo", "alpha"]);
+    assert_eq!(list("?limit=2&offset=2").await, ["Beta", "charlie"]);
+    assert_eq!(list("?limit=3&offset=3").await, ["charlie", "zebra", "Zed"]);
+    // A ordem por data não mudou: do mais novo para o mais antigo.
+    assert_eq!(
+        list("?sort=newest&limit=2").await,
+        ["charlie", "Álamo"],
+        "newest order must still follow creation time"
+    );
+}

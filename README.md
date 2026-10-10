@@ -137,7 +137,7 @@ Todo pedido traz `paid_at`: o instante em que ele virou `paid`, gravado pelo ban
 
 `GET /products` devolve os produtos ativos por nome e, em empate, por id. Com `?sort=newest` vêm do mais recente para o mais antigo, e os produtos sem data de criação ficam no fim; `?sort=name` é o padrão. Valor de `sort` desconhecido devolve `422`, e parâmetros que a rota não conhece são ignorados.
 
-As variantes (`GET /products/{id}/variants`, o `variants` do detalhe público e o do detalhe de admin) vêm por nome e, em empate, por SKU (que é único, então a ordem é sempre a mesma). Não há `sort` nem paginação para elas. A ordem de texto diferencia maiúsculas de minúsculas (`Zed` vem antes de `alpha`), como na ordenação de produtos.
+As variantes (`GET /products/{id}/variants`, o `variants` do detalhe público e o do detalhe de admin) vêm por nome e, em empate, por SKU (que é único, então a ordem é sempre a mesma). Não há `sort` nem paginação para elas. A ordenação por nome usa a colação Unicode do SurrealDB (`COLLATE`): ignora diferenças de maiúsculas e minúsculas e coloca letras acentuadas junto das demais (`Álamo`, `alpha`, `Beta`, `zebra`, `Zed`), e vale para produtos e variantes. Ela **não** faz ordem natural de números dentro do texto (`Item 10` vem antes de `Item 2`) nem tem ajuste específico para o português. Nomes que só diferem na caixa ficam juntos, numa ordem estável entre chamadas.
 
 ## Paginação da listagem pública
 

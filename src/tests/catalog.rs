@@ -684,3 +684,105 @@ async fn x_total_count_is_the_number_of_active_products_whatever_the_page() {
         .await;
     assert_eq!(page(&app, "?limit=2").await.1.as_deref(), Some("4"));
 }
+
+/// Nomes que a ordem binária (maiúsculas antes de minúsculas, acentos no fim) erraria.
+const MIXED_NAMES: [&str; 6] = ["zebra", "Zed", "alpha", "Beta", "Álamo", "charlie"];
+const MIXED_SORTED: [&str; 6] = ["Álamo", "alpha", "Beta", "charlie", "zebra", "Zed"];
+
+fn folded(names: &[String]) -> Vec<String> {
+    names.iter().map(|name| name.to_lowercase()).collect()
+}
+
+#[tokio::test]
+async fn the_public_product_list_sorts_text_ignoring_case_and_accents() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    for name in MIXED_NAMES {
+        app.setup_product(&admin, name, 10, 5).await;
+    }
+
+    assert_eq!(public_names(&app, "").await, MIXED_SORTED);
+    assert_eq!(public_names(&app, "?sort=name").await, MIXED_SORTED);
+    // A paginação corta a mesma ordem, sem buracos nem repetição.
+    assert_eq!(public_names(&app, "?limit=2").await, ["Álamo", "alpha"]);
+    assert_eq!(
+        public_names(&app, "?limit=2&offset=2").await,
+        ["Beta", "charlie"]
+    );
+    assert_eq!(
+        public_names(&app, "?limit=2&offset=4").await,
+        ["zebra", "Zed"]
+    );
+}
+
+#[tokio::test]
+async fn names_that_differ_only_in_case_stay_together_in_a_stable_order() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    for name in ["beta", "Alpha", "BETA", "alpha", "Beta", "ALPHA"] {
+        app.setup_product(&admin, name, 10, 5).await;
+    }
+
+    let first = public_names(&app, "").await;
+    let second = public_names(&app, "").await;
+
+    // Ignorando a caixa, a lista está em ordem (alphas juntos, depois betas juntos).
+    assert_eq!(
+        folded(&first),
+        ["alpha", "alpha", "alpha", "beta", "beta", "beta"]
+    );
+    // Dentro de cada grupo a ordem não oscila entre chamadas.
+    assert_eq!(first, second);
+}
+
+#[tokio::test]
+async fn variants_sort_text_ignoring_case_and_accents() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let mug = app.setup_product(&admin, "Mug", 10, 5).await;
+    add_variants(
+        &app,
+        &admin,
+        &mug.product_id,
+        &[
+            ("zeta", "S-1"),
+            ("Alpha", "S-2"),
+            ("beta", "S-3"),
+            ("Álamo", "S-4"),
+        ],
+    )
+    .await;
+    let expected = ["Álamo", "Alpha", "beta", "Default", "zeta"];
+
+    let (_, list) = app
+        .send(
+            "GET",
+            &format!("/products/{}/variants", mug.product_id),
+            None,
+            None,
+        )
+        .await;
+    let (_, detail) = app
+        .send("GET", &format!("/products/{}", mug.product_id), None, None)
+        .await;
+    let (_, admin_detail) = app
+        .send(
+            "GET",
+            &format!("/admin/products/{}", mug.product_id),
+            Some(&admin),
+            None,
+        )
+        .await;
+
+    let names_of = |variants: &serde_json::Value| -> Vec<String> {
+        variants
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(names_of(&list), expected);
+    assert_eq!(names_of(&detail["variants"]), expected);
+    assert_eq!(names_of(&admin_detail["variants"]), expected);
+}
