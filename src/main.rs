@@ -60,6 +60,7 @@ async fn main() {
         .route("/auth/sign-up", post(auth_handlers::sign_up))
         .route("/auth/sign-in", post(auth_handlers::sign_in))
         .route("/auth/sign-out", post(auth_handlers::sign_out))
+        .route("/auth/refresh", post(auth_handlers::refresh))
         .route(
             "/products",
             get(product_handlers::list_products).post(product_handlers::create_product),

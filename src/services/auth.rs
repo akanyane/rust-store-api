@@ -3,7 +3,11 @@ use std::sync::OnceLock;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use chrono::{DateTime, Duration, Utc};
 use sha2::{Digest, Sha256};
-use surrealdb::{Surreal, engine::any::Any, types::Datetime};
+use surrealdb::{
+    Surreal,
+    engine::any::Any,
+    types::{Datetime, RecordId},
+};
 
 use crate::error::AppError;
 use crate::executor::Executor;
@@ -163,6 +167,11 @@ pub async fn sign_in(db: &Surreal<Any>, input: SignIn) -> Result<TokenPair, AppE
         _ => return Err(AppError::Unauthorized),
     };
 
+    issue_tokens(&ex, user.id).await
+}
+
+/// Gera um par de tokens novo e grava a sessão (só os hashes vão para o banco).
+async fn issue_tokens(ex: &Executor<'_>, user: RecordId) -> Result<TokenPair, AppError> {
     let tokens = TokenPair {
         session_token: generate_token(),
         refresh_token: generate_token(),
@@ -170,9 +179,9 @@ pub async fn sign_in(db: &Surreal<Any>, input: SignIn) -> Result<TokenPair, AppE
     let now = Utc::now();
 
     session_repo::create(
-        &ex,
+        ex,
         NewSession {
-            user: user.id,
+            user,
             token_hash: hash_token(&tokens.session_token),
             refresh_hash: hash_token(&tokens.refresh_token),
             expires_at: Datetime::from(now + Duration::hours(SESSION_TTL_HOURS)),
@@ -183,6 +192,59 @@ pub async fn sign_in(db: &Surreal<Any>, input: SignIn) -> Result<TokenPair, AppE
     .ok_or_else(|| AppError::Internal("failed to create session".to_string()))?;
 
     Ok(tokens)
+}
+
+/// Dois refreshes simultâneos com o mesmo token colidem na escrita da sessão. O SDK
+/// embarcado devolve isso como erro `Internal` sem detalhe estruturado, então só a
+/// mensagem o identifica. Quem perde a corrida deve receber 401, como se o token já
+/// tivesse sido gasto (o que de fato aconteceu).
+fn is_write_conflict(e: &AppError) -> bool {
+    matches!(e, AppError::Database(db_err) if db_err.message().contains("Transaction conflict"))
+}
+
+/// Troca um refresh token válido por um par novo (rotação): a sessão antiga é
+/// apagada, então um refresh token só vale uma vez. Tudo numa transação.
+pub async fn refresh(db: &Surreal<Any>, refresh_token: &str) -> Result<TokenPair, AppError> {
+    let tx = db.clone().begin().await?;
+    let result = refresh_in_tx(&Executor::Tx(&tx), refresh_token).await;
+
+    match result {
+        Ok(tokens) => match tx.commit().await {
+            Ok(_) => Ok(tokens),
+            Err(e) if is_write_conflict(&AppError::from(e.clone())) => Err(AppError::Unauthorized),
+            Err(e) => Err(e.into()),
+        },
+        Err(e) => {
+            if let Err(cancel_err) = tx.cancel().await {
+                eprintln!("Failed to roll back transaction: {cancel_err:?}");
+            }
+            if is_write_conflict(&e) {
+                return Err(AppError::Unauthorized);
+            }
+            Err(e)
+        }
+    }
+}
+
+async fn refresh_in_tx(ex: &Executor<'_>, refresh_token: &str) -> Result<TokenPair, AppError> {
+    let session = session_repo::find_by_refresh_hash(ex, &hash_token(refresh_token))
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+
+    if DateTime::<Utc>::from(session.refresh_expires_at) <= Utc::now() {
+        return Err(AppError::Unauthorized);
+    }
+
+    // Se outro refresh com o mesmo token já apagou a sessão, este não passa.
+    session_repo::delete(ex, session.id.clone())
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+
+    user_repo::find_by_id(ex, &id_to_string(&session.user))
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+
+    issue_tokens(ex, session.user).await
 }
 
 /// Devolve o user dono do token (a chave dele é também a do customer) e o papel,

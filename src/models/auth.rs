@@ -49,6 +49,12 @@ pub struct SignOut {
     pub refresh_token: String,
 }
 
+#[derive(Deserialize, Validate)]
+pub struct Refresh {
+    #[validate(length(min = 1, max = 128, message = "invalid token"))]
+    pub refresh_token: String,
+}
+
 /// Par de tokens recém-gerado, devolvido pelo service.
 pub struct TokenPair {
     pub session_token: String,

@@ -38,6 +38,7 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 | POST | `/auth/sign-up` | pública | Cadastro de cliente |
 | POST | `/auth/sign-in` | pública | Login; devolve `session_token` e `refresh_token` |
 | POST | `/auth/sign-out` | pública | Encerra a sessão a partir do `refresh_token` |
+| POST | `/auth/refresh` | pública | Troca um `refresh_token` por um par novo de tokens |
 | GET | `/products` | pública | Lista produtos |
 | POST | `/products` | admin | Cria produto |
 | GET | `/products/{id}` | pública | Detalha produto |
@@ -57,6 +58,7 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 Rotas protegidas esperam o cabeçalho `Authorization: Bearer <session_token>`.
 
 - A sessão dura 1 hora e o refresh token 15 dias.
+- `POST /auth/refresh` gira os tokens: o refresh token só vale uma vez, e a sessão antiga deixa de funcionar.
 - Senhas são guardadas com argon2; tokens, apenas como hash SHA-256.
 - O cliente é sempre identificado pelo token, nunca por um id na URL.
 
@@ -91,4 +93,4 @@ Os corpos JSON passam pelo extractor `ValidatedJson` (crate `validator`). Corpo 
 
 ## Limitações conhecidas
 
-Pagamento, refresh de token e limpeza de sessões expiradas ainda não foram implementados.
+Pagamento e limpeza de sessões expiradas ainda não foram implementados.
