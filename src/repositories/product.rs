@@ -3,8 +3,20 @@ use surrealdb::types::{RecordId, SurrealValue};
 use crate::executor::Executor;
 use crate::models::product::{NewProduct, ProductChanges, ProductPage, ProductRecord, ProductSort};
 
-pub async fn find_all(ex: &Executor<'_>) -> surrealdb::Result<Vec<ProductRecord>> {
-    ex.select_all("product").await
+/// Produtos ativos, por nome ou do mais recente para o mais antigo (os sem data ficam no
+/// fim); o id desempata, para a ordem não oscilar. O `true` vai como parâmetro porque o
+/// `query_all` exige um.
+pub async fn find_active(
+    ex: &Executor<'_>,
+    sort: ProductSort,
+) -> surrealdb::Result<Vec<ProductRecord>> {
+    let query = match sort {
+        ProductSort::Name => "SELECT * FROM product WHERE active = $active ORDER BY name, id",
+        ProductSort::Newest => {
+            "SELECT * FROM product WHERE active = $active ORDER BY created_at DESC, id"
+        }
+    };
+    ex.query_all(query, "active", true).await
 }
 
 pub async fn find_by_id(ex: &Executor<'_>, id: &str) -> surrealdb::Result<Option<ProductRecord>> {

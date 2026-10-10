@@ -4,20 +4,20 @@ use surrealdb::{Surreal, engine::any::Any, types::Datetime};
 use crate::error::AppError;
 use crate::executor::Executor;
 use crate::models::product::{
-    CreateProduct, ListProductsQuery, NewProduct, Product, ProductChanges, ProductDetail,
-    ProductPage, ProductRecord, UpdateProduct,
+    CreateProduct, ListProductsQuery, ListPublicProductsQuery, NewProduct, Product, ProductChanges,
+    ProductDetail, ProductPage, ProductRecord, UpdateProduct,
 };
 use crate::models::variant::{NewVariant, Variant};
 use crate::models::{DEFAULT_PAGE_SIZE, id_to_string};
 use crate::repositories::{product as product_repo, variant as variant_repo};
 
-pub async fn list_products(db: &Surreal<Any>) -> Result<Vec<Product>, AppError> {
-    let records = product_repo::find_all(&Executor::Db(db)).await?;
-    Ok(records
-        .into_iter()
-        .filter(|record| record.active)
-        .map(Product::from)
-        .collect())
+pub async fn list_products(
+    db: &Surreal<Any>,
+    query: ListPublicProductsQuery,
+) -> Result<Vec<Product>, AppError> {
+    let sort = query.sort.unwrap_or_default();
+    let records = product_repo::find_active(&Executor::Db(db), sort).await?;
+    Ok(records.into_iter().map(Product::from).collect())
 }
 
 pub async fn get_product(db: &Surreal<Any>, id: &str) -> Result<ProductDetail, AppError> {

@@ -39,7 +39,7 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 | POST | `/auth/sign-in` | pública | Login; devolve `session_token` e `refresh_token` |
 | POST | `/auth/sign-out` | pública | Encerra a sessão a partir do `refresh_token` |
 | POST | `/auth/refresh` | pública | Troca um `refresh_token` por um par novo de tokens |
-| GET | `/products` | pública | Lista produtos |
+| GET | `/products` | pública | Lista os produtos ativos (`?sort=name` ou `?sort=newest`) |
 | POST | `/products` | admin | Cria produto |
 | GET | `/products/{id}` | pública | Detalha produto |
 | GET | `/products/{id}/variants` | pública | Lista variantes do produto |
@@ -86,7 +86,7 @@ O `total` continua somando todos os itens, disponíveis ou não, e nenhum item �
 
 ## Exclusão lógica
 
-`DELETE` em produto ou variante não apaga o registro: marca `active = false`, porque pedidos e carrinhos apontam para eles. Itens inativos somem do catálogo público (`GET /products`, `/products/{id}`, `/products/{id}/variants`) e não entram no carrinho nem no checkout. Para reativar, use o `PUT` com `"active": true`; os ids de quem foi desativado se descobrem em `GET /admin/products?active=false` (produtos) e `GET /admin/products/{id}` (variantes, com o `active` de cada uma). A listagem de admin vem ordenada por nome (e id, em empate) e aceita `sort=name` (padrão) ou `sort=newest` (do mais recente para o mais antigo), `limit` (1 a 200, padrão 50) e `offset`; parâmetros inválidos devolvem `422`. A listagem pública não tem ordem definida. O `stock` do `PUT` é um valor absoluto: um checkout simultâneo pode ser sobrescrito.
+`DELETE` em produto ou variante não apaga o registro: marca `active = false`, porque pedidos e carrinhos apontam para eles. Itens inativos somem do catálogo público (`GET /products`, `/products/{id}`, `/products/{id}/variants`) e não entram no carrinho nem no checkout. Para reativar, use o `PUT` com `"active": true`; os ids de quem foi desativado se descobrem em `GET /admin/products?active=false` (produtos) e `GET /admin/products/{id}` (variantes, com o `active` de cada uma). A listagem de admin vem ordenada por nome (e id, em empate) e aceita `sort=name` (padrão) ou `sort=newest` (do mais recente para o mais antigo), `limit` (1 a 200, padrão 50) e `offset`; parâmetros inválidos devolvem `422`. O `stock` do `PUT` é um valor absoluto: um checkout simultâneo pode ser sobrescrito.
 
 ## Checkout
 
@@ -132,6 +132,10 @@ O pagamento é simulado: `POST /orders/{id}/pay` só troca o status de `pending`
 ## Data do pagamento
 
 Todo pedido traz `paid_at`: o instante em que ele virou `paid`, gravado pelo banco no mesmo comando que troca o status (tanto no `POST /orders/{id}/pay` quanto no `PUT /admin/orders/{id}/status`). É `null` enquanto o pedido não foi pago e em pedido cancelado. Enviar e entregar não alteram a data. Pedidos pagos **antes** do campo existir ficam com `paid_at: null`, porque a data real não foi guardada e não é inventada.
+
+## Ordem da listagem pública
+
+`GET /products` devolve todos os produtos ativos (sem paginação), por nome e, em empate, por id. Com `?sort=newest` vêm do mais recente para o mais antigo, e os produtos sem data de criação ficam no fim; `?sort=name` é o padrão. Valor desconhecido devolve `422`, e parâmetros que a rota não conhece são ignorados. A lista de variantes (`/products/{id}/variants` e o `variants` do detalhe) continua sem ordem definida.
 
 ## Data de criação do produto
 

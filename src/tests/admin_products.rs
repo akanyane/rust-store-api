@@ -65,10 +65,7 @@ async fn admin_sees_inactive_products_that_the_public_catalog_hides() {
         .send("GET", "/admin/products?active=true", Some(&admin), None)
         .await;
 
-    // A listagem pública não tem ordem definida; só o conteúdo importa aqui.
-    let mut public_names = names(&public);
-    public_names.sort();
-    assert_eq!(public_names, ["Alpha", "Charlie"]);
+    assert_eq!(names(&public), ["Alpha", "Charlie"]);
     assert_eq!(names(&all), ["Alpha", "Bravo", "Charlie"]);
     assert_eq!(names(&inactive), ["Bravo"]);
     assert_eq!(inactive[0]["active"], false);

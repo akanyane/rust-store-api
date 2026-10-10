@@ -235,3 +235,145 @@ async fn deleting_a_variant_hides_it_from_the_public_listing() {
     let (_, variants) = app.send("GET", &uri, None, None).await;
     assert!(variants.as_array().unwrap().is_empty());
 }
+
+fn product_names(list: &serde_json::Value) -> Vec<String> {
+    list.as_array()
+        .unwrap()
+        .iter()
+        .map(|product| product["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+async fn public_names(app: &TestApp, query: &str) -> Vec<String> {
+    let (status, body) = app
+        .send("GET", &format!("/products{query}"), None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{query}");
+    product_names(&body)
+}
+
+#[tokio::test]
+async fn the_public_list_is_ordered_by_name_whatever_the_creation_order() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    for name in ["Charlie", "Alpha", "Bravo"] {
+        app.setup_product(&admin, name, 10, 5).await;
+    }
+
+    let first = public_names(&app, "").await;
+    let second = public_names(&app, "").await;
+
+    assert_eq!(first, ["Alpha", "Bravo", "Charlie"]);
+    assert_eq!(first, second, "the order must not change between calls");
+    assert_eq!(public_names(&app, "?sort=name").await, first);
+}
+
+#[tokio::test]
+async fn the_public_list_can_show_the_most_recent_first() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    // Criados nesta ordem: por data é Charlie, Alpha, Bravo; por nome é outra.
+    for name in ["Bravo", "Alpha", "Charlie"] {
+        app.setup_product(&admin, name, 10, 5).await;
+    }
+
+    assert_eq!(
+        public_names(&app, "?sort=newest").await,
+        ["Charlie", "Alpha", "Bravo"]
+    );
+    assert_eq!(
+        public_names(&app, "").await,
+        ["Alpha", "Bravo", "Charlie"],
+        "the default stays by name"
+    );
+}
+
+#[tokio::test]
+async fn products_without_a_creation_date_come_last_in_the_newest_order() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    // Produto "antigo": gravado direto no banco, sem `created_at`.
+    app.db
+        .query("CREATE product SET name = 'Legacy', description = 'old', active = true")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    app.setup_product(&admin, "Newer", 10, 5).await;
+
+    assert_eq!(
+        public_names(&app, "?sort=newest").await,
+        ["Newer", "Legacy"]
+    );
+}
+
+#[tokio::test]
+async fn deactivated_products_stay_out_of_the_public_list_in_both_orders() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    app.setup_product(&admin, "Alpha", 10, 5).await;
+    let bravo = app.setup_product(&admin, "Bravo", 10, 5).await;
+    app.setup_product(&admin, "Charlie", 10, 5).await;
+    app.send(
+        "DELETE",
+        &format!("/products/{}", bravo.product_id),
+        Some(&admin),
+        None,
+    )
+    .await;
+
+    assert_eq!(public_names(&app, "").await, ["Alpha", "Charlie"]);
+    assert_eq!(
+        public_names(&app, "?sort=newest").await,
+        ["Charlie", "Alpha"]
+    );
+
+    app.send(
+        "PUT",
+        &format!("/products/{}", bravo.product_id),
+        Some(&admin),
+        Some(json!({ "name": "Bravo", "description": "d", "active": true })),
+    )
+    .await;
+    assert_eq!(public_names(&app, "").await, ["Alpha", "Bravo", "Charlie"]);
+}
+
+#[tokio::test]
+async fn products_with_the_same_name_keep_a_stable_public_order() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let first = app.setup_product(&admin, "Same", 10, 5).await;
+    let second = app.setup_product(&admin, "Same", 10, 5).await;
+    let mut expected = vec![first.product_id, second.product_id];
+    expected.sort();
+
+    for query in ["", "?sort=name"] {
+        let (_, list) = app
+            .send("GET", &format!("/products{query}"), None, None)
+            .await;
+        let ids: Vec<String> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["id"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(ids, expected, "{query}");
+    }
+}
+
+#[tokio::test]
+async fn an_unknown_sort_is_422_but_other_parameters_are_ignored() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    app.setup_product(&admin, "Mug", 10, 5).await;
+
+    for query in ["?sort=oldest", "?sort=NAME", "?sort="] {
+        let (status, body) = app
+            .send("GET", &format!("/products{query}"), None, None)
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{query}");
+        assert_eq!(body["error"], "Invalid query parameters", "{query}");
+    }
+    // Parâmetros que a rota não conhece (como os de campanha) continuam sendo ignorados.
+    assert_eq!(public_names(&app, "?utm_source=newsletter").await, ["Mug"]);
+}

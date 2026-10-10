@@ -117,6 +117,12 @@ pub enum ProductSort {
     Newest,
 }
 
+/// Parâmetros da listagem pública: só a ordem. Sem paginação, a rota devolve todos os ativos.
+#[derive(Debug, Deserialize, Validate)]
+pub struct ListPublicProductsQuery {
+    pub sort: Option<ProductSort>,
+}
+
 #[derive(Debug, Deserialize, Validate)]
 pub struct ListProductsQuery {
     pub active: Option<bool>,

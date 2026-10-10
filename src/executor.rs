@@ -36,16 +36,6 @@ impl Executor<'_> {
         }
     }
 
-    pub async fn select_all<R>(&self, table: &str) -> surrealdb::Result<Vec<R>>
-    where
-        R: SurrealValue,
-    {
-        match self {
-            Executor::Db(db) => db.select(table.to_string()).await,
-            Executor::Tx(tx) => tx.select(table.to_string()).await,
-        }
-    }
-
     pub async fn select_one<R>(&self, id: RecordId) -> surrealdb::Result<Option<R>>
     where
         R: SurrealValue,

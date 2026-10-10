@@ -7,13 +7,17 @@ use axum::{
 use crate::error::AppError;
 use crate::extractors::{AuthAdmin, ValidatedJson, ValidatedQuery};
 use crate::models::product::{
-    CreateProduct, ListProductsQuery, Product, ProductDetail, UpdateProduct,
+    CreateProduct, ListProductsQuery, ListPublicProductsQuery, Product, ProductDetail,
+    UpdateProduct,
 };
 use crate::services::product as product_service;
 use crate::state::AppState;
 
-pub async fn list_products(State(state): State<AppState>) -> Result<Json<Vec<Product>>, AppError> {
-    let products = product_service::list_products(&state.db).await?;
+pub async fn list_products(
+    State(state): State<AppState>,
+    ValidatedQuery(query): ValidatedQuery<ListPublicProductsQuery>,
+) -> Result<Json<Vec<Product>>, AppError> {
+    let products = product_service::list_products(&state.db, query).await?;
     Ok(Json(products))
 }
 
