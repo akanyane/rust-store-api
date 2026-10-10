@@ -41,6 +41,24 @@ async fn seed_admin(db: &Surreal<Any>) {
     }
 }
 
+const SESSION_CLEANUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// Limpa sessões expiradas na partida e depois a cada hora. Falha só é logada: o
+/// próximo ciclo tenta de novo e o servidor continua de pé.
+fn spawn_session_cleanup(db: Surreal<Any>) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(SESSION_CLEANUP_INTERVAL);
+        loop {
+            // O primeiro tick é imediato, então a primeira limpeza roda na partida.
+            interval.tick().await;
+            match auth_service::purge_expired_sessions(&db).await {
+                Ok(count) => println!("Purged {count} expired session(s)"),
+                Err(e) => eprintln!("Session cleanup failed: {e:?}"),
+            }
+        }
+    });
+}
+
 #[tokio::main]
 async fn main() {
     // Em produção o .env pode não existir; nesse caso valem as variáveis do ambiente.
@@ -53,6 +71,7 @@ async fn main() {
 
     let db = db::connect_db().await.unwrap();
     seed_admin(&db).await;
+    spawn_session_cleanup(db.clone());
     let state = AppState { db };
 
     let app = Router::new()

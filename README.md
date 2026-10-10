@@ -59,6 +59,7 @@ Rotas protegidas esperam o cabeçalho `Authorization: Bearer <session_token>`.
 
 - A sessão dura 1 hora e o refresh token 15 dias.
 - `POST /auth/refresh` gira os tokens: o refresh token só vale uma vez, e a sessão antiga deixa de funcionar.
+- Sessões com refresh token vencido são apagadas na partida e depois a cada hora.
 - Senhas são guardadas com argon2; tokens, apenas como hash SHA-256.
 - O cliente é sempre identificado pelo token, nunca por um id na URL.
 
@@ -93,4 +94,4 @@ Os corpos JSON passam pelo extractor `ValidatedJson` (crate `validator`). Corpo 
 
 ## Limitações conhecidas
 
-Pagamento e limpeza de sessões expiradas ainda não foram implementados.
+Pagamento ainda não foi implementado.

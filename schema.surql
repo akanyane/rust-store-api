@@ -32,6 +32,7 @@ DEFINE FIELD IF NOT EXISTS refresh_expires_at ON session TYPE datetime;
 DEFINE INDEX IF NOT EXISTS session_token_unique   ON session FIELDS token_hash UNIQUE;
 DEFINE INDEX IF NOT EXISTS session_refresh_unique ON session FIELDS refresh_hash UNIQUE;
 DEFINE INDEX IF NOT EXISTS session_user ON session FIELDS user;
+DEFINE INDEX IF NOT EXISTS session_refresh_expires ON session FIELDS refresh_expires_at;
 
 -- Perfil do cliente. O e-mail agora vive só no user.
 DEFINE TABLE IF NOT EXISTS customer SCHEMAFULL;

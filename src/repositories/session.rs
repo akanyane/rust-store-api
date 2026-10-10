@@ -1,4 +1,4 @@
-use surrealdb::types::RecordId;
+use surrealdb::types::{Datetime, RecordId};
 
 use crate::executor::Executor;
 use crate::models::session::{NewSession, SessionRecord};
@@ -51,6 +51,20 @@ pub async fn delete_by_user(
         "DELETE session WHERE user = $user RETURN BEFORE",
         "user",
         user,
+    )
+    .await
+}
+
+/// Apaga as sessões cujo refresh token já venceu (o session token vence antes, então
+/// nenhum dos dois serve mais). Um único comando, sem conflito com sign-in/refresh.
+pub async fn delete_expired(
+    ex: &Executor<'_>,
+    now: Datetime,
+) -> surrealdb::Result<Vec<SessionRecord>> {
+    ex.query_all(
+        "DELETE session WHERE refresh_expires_at <= $now RETURN BEFORE",
+        "now",
+        now,
     )
     .await
 }

@@ -313,3 +313,10 @@ pub async fn sign_out(db: &Surreal<Any>, refresh_token: &str) -> Result<(), AppE
     }
     Ok(())
 }
+
+/// Remove as sessões com refresh token vencido e devolve quantas foram apagadas.
+pub async fn purge_expired_sessions(db: &Surreal<Any>) -> Result<usize, AppError> {
+    let ex = Executor::Db(db);
+    let deleted = session_repo::delete_expired(&ex, Datetime::from(Utc::now())).await?;
+    Ok(deleted.len())
+}
