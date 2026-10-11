@@ -23,6 +23,21 @@ async fn authenticate_request(parts: &Parts, state: &AppState) -> Result<Authent
     auth_service::authenticate(&state.db, token).await
 }
 
+/// Qualquer usuário autenticado (cliente ou admin): 401 sem token válido. Usado por
+/// `GET /auth/session`, que só informa quem é e qual o papel.
+pub struct AuthUser(pub Authenticated);
+
+impl FromRequestParts<AppState> for AuthUser {
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(AuthUser(authenticate_request(parts, state).await?))
+    }
+}
+
 /// Cliente autenticado pelo header `Authorization: Bearer <session_token>`.
 /// Guarda a chave do customer, que é a mesma do user dono da sessão.
 pub struct AuthCustomer(pub String);

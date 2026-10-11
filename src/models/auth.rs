@@ -64,6 +64,15 @@ pub struct TokenPair {
 /// Quem está por trás de um session token válido.
 pub struct Authenticated {
     pub user_id: String,
+    pub username: String,
+    pub role: String,
+}
+
+/// Quem está logado, para o frontend saber o papel (cliente ou admin) sem adivinhar.
+#[derive(Serialize)]
+pub struct SessionView {
+    pub id: String,
+    pub username: String,
     pub role: String,
 }
 

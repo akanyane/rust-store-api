@@ -343,3 +343,117 @@ async fn sign_out_kills_the_whole_session() {
         .await;
     assert_eq!(again, StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn session_reports_who_is_logged_in_and_with_which_role() {
+    let app = TestApp::new().await;
+    let customer = app.customer("ana").await;
+    let admin = app.admin().await;
+
+    let (status, body) = app
+        .send("GET", "/auth/session", Some(&customer), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["username"], "ana");
+    assert_eq!(body["role"], "customer");
+    // O id é o do usuário, o mesmo do perfil.
+    let (_, me) = app.send("GET", "/me", Some(&customer), None).await;
+    assert_eq!(body["id"], me["id"]);
+
+    // O admin não tem perfil de cliente (`/me` dá 404), mas a sessão diz quem ele é.
+    let (status, body) = app.send("GET", "/auth/session", Some(&admin), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["username"], "admin");
+    assert_eq!(body["role"], "admin");
+    assert!(body["id"].as_str().is_some_and(|id| !id.is_empty()));
+    assert_eq!(
+        app.send("GET", "/me", Some(&admin), None).await.0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn session_exposes_only_id_username_and_role() {
+    let app = TestApp::new().await;
+    let customer = app.customer("ana").await;
+
+    let (_, body) = app
+        .send("GET", "/auth/session", Some(&customer), None)
+        .await;
+
+    let mut keys: Vec<&str> = body
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort();
+    assert_eq!(keys, ["id", "role", "username"]);
+}
+
+#[tokio::test]
+async fn session_requires_a_valid_token() {
+    let app = TestApp::new().await;
+    app.customer("ana").await;
+
+    for token in [None, Some("garbage"), Some("")] {
+        let (status, _) = app.send("GET", "/auth/session", token, None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{token:?}");
+    }
+}
+
+#[tokio::test]
+async fn session_rejects_an_expired_session_and_a_signed_out_one() {
+    use sha2::{Digest, Sha256};
+
+    let app = TestApp::new().await;
+    let (_, session, refresh) = {
+        app.sign_up("ana").await;
+        app.sign_in("ana", PASSWORD).await
+    };
+    assert_eq!(
+        app.send("GET", "/auth/session", Some(&session), None)
+            .await
+            .0,
+        StatusCode::OK
+    );
+
+    // Uma sessão cujo session token já venceu (o refresh ainda valeria).
+    let hash: String = Sha256::digest(b"expired-token")
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    app.db
+        .query(format!(
+            "LET $u = (SELECT VALUE id FROM user WHERE username = 'ana')[0];
+             CREATE session SET user = $u, token_hash = '{hash}', refresh_hash = 'r-expired',
+                 expires_at = time::now() - 1h, refresh_expires_at = time::now() + 1d;"
+        ))
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    assert_eq!(
+        app.send("GET", "/auth/session", Some("expired-token"), None)
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+
+    // Depois do sign-out, o session token também deixa de valer.
+    let (status, _) = app
+        .send(
+            "POST",
+            "/auth/sign-out",
+            None,
+            Some(json!({ "refresh_token": refresh })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        app.send("GET", "/auth/session", Some(&session), None)
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+}

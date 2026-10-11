@@ -257,6 +257,7 @@ pub async fn authenticate(db: &Surreal<Any>, token: &str) -> Result<Authenticate
 
     Ok(Authenticated {
         user_id: id_to_string(&user.id),
+        username: user.username,
         role: user.role,
     })
 }

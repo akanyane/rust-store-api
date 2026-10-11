@@ -39,6 +39,7 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 | POST | `/auth/sign-in` | pública | Login; devolve `session_token` e `refresh_token` |
 | POST | `/auth/sign-out` | pública | Encerra a sessão a partir do `refresh_token` |
 | POST | `/auth/refresh` | pública | Troca um `refresh_token` por um par novo de tokens |
+| GET | `/auth/session` | cliente ou admin | Quem está logado: `id`, `username` e `role` (`customer` ou `admin`) |
 | GET | `/products` | pública | Lista os produtos ativos (`?sort=`, `?limit=`, `?offset=`; total em `X-Total-Count`; com `price_from` e `price_to`) |
 | POST | `/products` | admin | Cria produto |
 | GET | `/products/{id}` | pública | Detalha produto |
@@ -71,6 +72,7 @@ O login é por `username` e senha, sem e-mail. O `username` não diferencia mai�
 
 - A sessão dura 1 hora e o refresh token 15 dias.
 - `POST /auth/refresh` gira os tokens: o refresh token só vale uma vez, e a sessão antiga deixa de funcionar.
+- `GET /auth/session` diz quem está logado e com qual papel. O `/me` é só de cliente (dá 404 para admin, que não tem perfil); a sessão serve para o frontend saber se mostra a área de admin.
 - Sessões com refresh token vencido são apagadas na partida e depois a cada hora.
 - Senhas são guardadas com argon2; tokens, apenas como hash SHA-256.
 - O cliente é sempre identificado pelo token, nunca por um id na URL.

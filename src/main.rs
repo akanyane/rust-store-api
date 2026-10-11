@@ -71,6 +71,7 @@ fn build_router(state: AppState) -> Router {
         .route("/auth/sign-in", post(auth_handlers::sign_in))
         .route("/auth/sign-out", post(auth_handlers::sign_out))
         .route("/auth/refresh", post(auth_handlers::refresh))
+        .route("/auth/session", get(auth_handlers::session))
         .route(
             "/products",
             get(product_handlers::list_products).post(product_handlers::create_product),

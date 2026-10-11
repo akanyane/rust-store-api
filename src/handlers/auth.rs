@@ -1,8 +1,8 @@
 use axum::{Json, extract::State, http::StatusCode};
 
 use crate::error::AppError;
-use crate::extractors::ValidatedJson;
-use crate::models::auth::{AuthResponse, Refresh, SignIn, SignOut, SignUp, TokenPair};
+use crate::extractors::{AuthUser, ValidatedJson};
+use crate::models::auth::{AuthResponse, Refresh, SessionView, SignIn, SignOut, SignUp, TokenPair};
 use crate::models::customer::Customer;
 use crate::services::auth as auth_service;
 use crate::state::AppState;
@@ -53,4 +53,14 @@ pub async fn refresh(
         refresh_token,
         token_type: "Bearer".to_string(),
     }))
+}
+
+/// Quem está logado e com qual papel. Vale para cliente e para admin (o `/me` é só de
+/// cliente e dá 404 para admin, que não tem perfil).
+pub async fn session(AuthUser(auth): AuthUser) -> Json<SessionView> {
+    Json(SessionView {
+        id: auth.user_id,
+        username: auth.username,
+        role: auth.role,
+    })
 }
