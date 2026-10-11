@@ -1,174 +1,353 @@
 # Rust Store API
 
-API de loja online escrita em Rust com Axum: produtos, variantes, carrinho, autenticação e pedidos com checkout transacional.
+[![Rust](https://img.shields.io/badge/Rust-2024_edition-orange?logo=rust)](https://www.rust-lang.org)
+[![Axum](https://img.shields.io/badge/Axum-0.8-blue)](https://github.com/tokio-rs/axum)
+[![SurrealDB](https://img.shields.io/badge/SurrealDB-3.3_embedded-ff00a0)](https://surrealdb.com)
+[![Release](https://img.shields.io/github/v/release/akanyane/rust-store-api?include_prereleases&sort=semver)](https://github.com/akanyane/rust-store-api/releases)
+[![License: Unlicense](https://img.shields.io/badge/license-Unlicense-green)](LICENSE)
 
-## Stack
+A small online-store API written in Rust: catalog with variants, cart,
+authentication with refreshable sessions, transactional checkout, simulated
+payment and an admin surface for products and orders. There is **no external
+database to run**: SurrealDB is embedded and stores everything under `data/`.
 
-- Rust (edition 2024)
-- [Axum](https://github.com/tokio-rs/axum) 0.8 sobre Tokio
-- [SurrealDB](https://surrealdb.com) 3.3 embarcado (`surrealkv`), sem servidor de banco externo
-- argon2 (hash de senha) e SHA-256 (hash dos tokens de sessão)
+It is built for **simulated purchases**. There is no payment gateway, no email
+and no real money, and the store's currency is the **unit** (a whole number,
+no subunits).
 
-## Como rodar
+The web storefront and admin console that talk to this API live in
+[rust-store-web](https://github.com/akanyane/rust-store-web).
+
+## Highlights
+
+- **Transactional checkout**: stock is checked and decremented in one atomic
+  command, so two buyers racing for the last unit never oversell. The loser gets
+  a `409`, never a `500`.
+- **Sessions you can actually revoke**: 1-hour session token plus a single-use
+  15-day refresh token that rotates; only SHA-256 hashes of tokens are stored,
+  passwords use argon2.
+- **Soft deletes**: products and variants are deactivated, not erased, because
+  carts and orders point at them.
+- **Order snapshots**: an order keeps the name, SKU and price from the moment of
+  purchase.
+- **Admin surface**: list and filter all orders, move them through the status
+  cycle, and manage inactive products and variants.
+- **Input validation** with no echo of what was sent (privacy by default).
+- **Integration tests** that boot the whole app against a throwaway database.
+
+## Table of contents
+
+- [Quick start](#quick-start) · [Environment variables](#environment-variables)
+- [Try it](#try-it)
+- [Routes](#routes)
+- [Authentication](#authentication)
+- [Catalog](#catalog): [soft delete](#soft-delete), [ordering](#ordering),
+  [price range](#price-range), [pagination and totals](#pagination-and-totals),
+  [creation date](#creation-date)
+- [Cart and checkout](#cart-and-checkout)
+- [Orders and payment](#orders-and-payment)
+- [Conventions](#conventions): currency, validation
+- [Project layout](#project-layout) · [Tests](#tests) · [Known limitations](#known-limitations)
+
+## Quick start
+
+You need a recent stable Rust toolchain (the crate uses the 2024 edition).
 
 ```bash
-cp .env.example .env
+cp .env.example .env     # then set ADMIN_USERNAME and ADMIN_PASSWORD if you want an admin
 cargo run
 ```
 
-O banco é criado em `data/rust-store` (ignorado pelo git) e o schema (`schema.surql`) é aplicado a cada partida. O servidor sobe em `http://localhost:3000` por padrão.
+The server listens on `http://localhost:3000`. The database is created at
+`data/rust-store` (git-ignored) and the schema (`schema.surql`) is applied on
+every start.
 
-### Variáveis de ambiente
+### Environment variables
 
-| Variável | Obrigatória | Descrição |
+| Variable | Required | Description |
 |---|---|---|
-| `PORT` | não | Porta HTTP. Padrão `3000`. |
-| `ADMIN_USERNAME` | não* | Username do admin criado na partida. |
-| `ADMIN_PASSWORD` | não* | Senha do admin criado na partida. |
+| `PORT` | no | HTTP port. Defaults to `3000`. |
+| `ADMIN_USERNAME` | no* | Username of the admin created on startup. |
+| `ADMIN_PASSWORD` | no* | Password of the admin created on startup. |
 
-\* Defina `ADMIN_USERNAME` e `ADMIN_PASSWORD` juntas, ou nenhuma das duas. Valor vazio conta como ausente e a loja sobe sem admin. A criação é idempotente: não troca a senha nem promove um usuário comum já existente.
+\* Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` together, or neither. An empty
+value counts as missing, and the store then starts without an admin. Creation is
+idempotent: it never changes the password of an existing admin and never
+promotes an existing regular user.
 
-## Rotas
+## Try it
 
-Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bearer token de um admin).
+A full purchase from the terminal (admin credentials as set in `.env`; the
+ids in the responses are random strings, so copy them as you go):
 
-| Método | Rota | Acesso | Descrição |
+```bash
+API=http://localhost:3000
+
+# 1. Admin signs in and creates a product (a "Default" variant is created with it)
+ADMIN=$(curl -s $API/auth/sign-in -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"<ADMIN_PASSWORD>"}' | jq -r .session_token)
+curl -s $API/products -H "authorization: Bearer $ADMIN" -H 'content-type: application/json' \
+  -d '{"name":"Ceramic mug","description":"Blue","price":25,"stock":10}'
+
+# 2. A customer signs up, and finds the variant id
+curl -s $API/auth/sign-up -H 'content-type: application/json' \
+  -d '{"username":"ana","password":"a-long-password","first_name":"Ana","last_name":"Lima","birthday":"1990-01-01"}'
+TOKEN=$(curl -s $API/auth/sign-in -H 'content-type: application/json' \
+  -d '{"username":"ana","password":"a-long-password"}' | jq -r .session_token)
+curl -s $API/products            # note the product id
+curl -s $API/products/<product_id>/variants   # note the variant id
+
+# 3. Cart, checkout, simulated payment
+curl -s $API/cart/items -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"variant_id":"<variant_id>","quantity":2}'
+curl -s -X POST $API/orders -H "authorization: Bearer $TOKEN"
+curl -s -X POST $API/orders/<order_id>/pay -H "authorization: Bearer $TOKEN"
+```
+
+## Routes
+
+Access is **public**, **customer** (Bearer token of a customer) or **admin**
+(Bearer token of an admin).
+
+| Method | Route | Access | Description |
 |---|---|---|---|
-| GET | `/health` | pública | Health check |
-| POST | `/auth/sign-up` | pública | Cadastro de cliente (`username`, `password`, nomes e nascimento) |
-| POST | `/auth/sign-in` | pública | Login; devolve `session_token` e `refresh_token` |
-| POST | `/auth/sign-out` | pública | Encerra a sessão a partir do `refresh_token` |
-| POST | `/auth/refresh` | pública | Troca um `refresh_token` por um par novo de tokens |
-| GET | `/auth/session` | cliente ou admin | Quem está logado: `id`, `username` e `role` (`customer` ou `admin`) |
-| GET | `/products` | pública | Lista os produtos ativos (`?sort=`, `?limit=`, `?offset=`; total em `X-Total-Count`; com `price_from` e `price_to`) |
-| POST | `/products` | admin | Cria produto |
-| GET | `/products/{id}` | pública | Detalha produto |
-| GET | `/products/{id}/variants` | pública | Lista variantes do produto |
-| POST | `/products/{id}/variants` | admin | Cria variante |
-| PUT | `/products/{id}` | admin | Substitui nome, descrição e `active` do produto |
-| DELETE | `/products/{id}` | admin | Desativa o produto (exclusão lógica) |
-| PUT | `/products/{id}/variants/{variant_id}` | admin | Substitui nome, SKU, preço, estoque e `active` da variante |
-| DELETE | `/products/{id}/variants/{variant_id}` | admin | Desativa a variante (exclusão lógica) |
-| GET | `/admin/products` | admin | Lista produtos ativos e inativos (`?active=`, `?sort=`, `?limit=`, `?offset=`; total em `X-Total-Count`) |
-| GET | `/admin/products/{id}` | admin | Detalha o produto (mesmo inativo) com todas as variantes, inclusive as inativas |
-| GET, PUT, DELETE | `/me` | cliente | Consulta, atualiza e remove o próprio cadastro |
-| GET | `/cart` | cliente | Consulta o carrinho |
-| POST | `/cart/items` | cliente | Adiciona variante ao carrinho |
-| PUT, DELETE | `/cart/items/{variant_id}` | cliente | Altera quantidade ou remove item |
-| GET | `/orders` | cliente | Lista os pedidos do cliente |
-| POST | `/orders` | cliente | Checkout do carrinho |
-| GET | `/orders/{id}` | cliente | Detalha um pedido do cliente |
-| POST | `/orders/{id}/cancel` | cliente | Cancela um pedido pendente e devolve o estoque |
-| POST | `/orders/{id}/pay` | cliente | Pagamento simulado de um pedido pendente |
-| GET | `/admin/orders` | admin | Lista os pedidos de todos os clientes (`?status=`, `?limit=`, `?offset=`; total em `X-Total-Count`) |
-| GET | `/admin/orders/{id}` | admin | Detalha qualquer pedido |
-| PUT | `/admin/orders/{id}/status` | admin | Muda o status do pedido |
+| GET | `/health` | public | Health check |
+| POST | `/auth/sign-up` | public | Customer sign-up (`username`, `password`, names and birthday) |
+| POST | `/auth/sign-in` | public | Sign in; returns `session_token` and `refresh_token` |
+| POST | `/auth/sign-out` | public | Ends the session, given the `refresh_token` |
+| POST | `/auth/refresh` | public | Exchanges a `refresh_token` for a new pair of tokens |
+| GET | `/auth/session` | customer or admin | Who is signed in: `id`, `username` and `role` (`customer` or `admin`) |
+| GET | `/products` | public | Lists active products (`?sort=`, `?limit=`, `?offset=`; total in `X-Total-Count`; with `price_from` and `price_to`) |
+| POST | `/products` | admin | Creates a product |
+| GET | `/products/{id}` | public | Product detail |
+| PUT | `/products/{id}` | admin | Replaces the product's name, description and `active` |
+| DELETE | `/products/{id}` | admin | Deactivates the product (soft delete) |
+| GET | `/products/{id}/variants` | public | Lists the product's variants |
+| POST | `/products/{id}/variants` | admin | Creates a variant |
+| PUT | `/products/{id}/variants/{variant_id}` | admin | Replaces the variant's name, SKU, price, stock and `active` |
+| DELETE | `/products/{id}/variants/{variant_id}` | admin | Deactivates the variant (soft delete) |
+| GET | `/admin/products` | admin | Lists active and inactive products (`?active=`, `?sort=`, `?limit=`, `?offset=`; total in `X-Total-Count`) |
+| GET | `/admin/products/{id}` | admin | Product detail (even if inactive) with every variant, inactive ones included |
+| GET, PUT, DELETE | `/me` | customer | Reads, updates and deletes the customer's own profile |
+| GET | `/cart` | customer | Reads the cart |
+| POST | `/cart/items` | customer | Adds a variant to the cart |
+| PUT, DELETE | `/cart/items/{variant_id}` | customer | Changes the quantity or removes an item |
+| GET | `/orders` | customer | Lists the customer's orders |
+| POST | `/orders` | customer | Checks out the cart |
+| GET | `/orders/{id}` | customer | One of the customer's orders |
+| POST | `/orders/{id}/cancel` | customer | Cancels a pending order and returns the stock |
+| POST | `/orders/{id}/pay` | customer | Simulated payment of a pending order |
+| GET | `/admin/orders` | admin | Lists every customer's orders (`?status=`, `?limit=`, `?offset=`; total in `X-Total-Count`) |
+| GET | `/admin/orders/{id}` | admin | Any order |
+| PUT | `/admin/orders/{id}/status` | admin | Changes the order's status |
 
-## Autenticação
+## Authentication
 
-Rotas protegidas esperam o cabeçalho `Authorization: Bearer <session_token>`.
+Protected routes expect `Authorization: Bearer <session_token>`.
 
-O login é por `username` e senha, sem e-mail. O `username` não diferencia maiúsculas de minúsculas (`Ana` e `ana` são o mesmo usuário) e é guardado em minúsculas.
+Sign-in is by `username` and password, with no email. The `username` is
+case-insensitive (`Ana` and `ana` are the same user) and stored in lowercase.
 
-- A sessão dura 1 hora e o refresh token 15 dias.
-- `POST /auth/refresh` gira os tokens: o refresh token só vale uma vez, e a sessão antiga deixa de funcionar.
-- `GET /auth/session` diz quem está logado e com qual papel. O `/me` é só de cliente (dá 404 para admin, que não tem perfil); a sessão serve para o frontend saber se mostra a área de admin.
-- Sessões com refresh token vencido são apagadas na partida e depois a cada hora.
-- Senhas são guardadas com argon2; tokens, apenas como hash SHA-256.
-- O cliente é sempre identificado pelo token, nunca por um id na URL.
+- A session lasts 1 hour and a refresh token 15 days.
+- `POST /auth/refresh` rotates the tokens: a refresh token works only once, and
+  the old session stops working.
+- `GET /auth/session` says who is signed in and with which role. `/me` is for
+  customers only (it returns 404 for an admin, who has no profile); the session
+  route is how a frontend knows whether to show the admin area.
+- Sessions whose refresh token has expired are deleted on startup and then every
+  hour.
+- Passwords are stored with argon2; tokens only as SHA-256 hashes.
+- The customer is always identified by the token, never by an id in the URL.
 
-## Nome do produto nos itens
+## Catalog
 
-Os itens do carrinho e dos pedidos trazem `name` (o nome da **variante**; a variante padrão, criada junto com o produto, se chama `Default`) e `product_name` (o nome do **produto**). No **carrinho**, `product_name` é o nome atual, então renomear o produto aparece na hora. Nos **pedidos**, é um retrato do momento da compra, como o nome da variante, o SKU e o preço: renomear o produto depois não muda um pedido já feito. Vale para as respostas do cliente e do admin. Itens de pedido criados **antes** do campo existir vêm com `product_name: null`, porque o nome daquela época não foi guardado e não é inventado.
+### Soft delete
 
-## Itens indisponíveis no carrinho
+`DELETE` on a product or variant does not erase the record: it sets
+`active = false`, because orders and carts point at them. Inactive items vanish
+from the public catalog (`GET /products`, `/products/{id}`,
+`/products/{id}/variants`) and cannot enter a cart or a checkout. To reactivate
+one, `PUT` it with `"active": true`; find the ids of deactivated items with
+`GET /admin/products?active=false` (products) and `GET /admin/products/{id}`
+(variants, with each one's `active`). The `stock` in a `PUT` is an absolute
+value, so a concurrent checkout may be overwritten.
 
-As respostas de carrinho (`GET /cart`, `POST /cart/items`, `PUT` e `DELETE /cart/items/{variant_id}`) sinalizam o que não pode ser comprado agora:
+### Ordering
 
-- cada item traz `available` e `unavailable_reason`: `null` quando disponível, `"inactive"` se o produto ou a variante foi desativado, `"insufficient_stock"` se o estoque atual é menor que a quantidade (inclui estoque zero; quantidade igual ao estoque ainda é válida);
-- o carrinho traz `can_checkout`: `true` só se há itens e todos estão disponíveis.
+`GET /products` returns active products by name and, on a tie, by id. With
+`?sort=newest` they come from newest to oldest, and products without a creation
+date go last; `?sort=name` is the default. An unknown `sort` returns `422`, and
+parameters the route does not know are ignored. The admin list accepts the same
+`sort`.
 
-O `total` continua somando todos os itens, disponíveis ou não, e nenhum item é removido sozinho. É um retrato do momento: quem decide é o checkout, que segue recusando com `409` se algo mudou entre a leitura do carrinho e a compra.
+Variants (`GET /products/{id}/variants`, the `variants` of the public detail and
+of the admin detail) come by name and, on a tie, by SKU (which is unique, so the
+order is always the same). They have no `sort` or pagination. Name ordering uses
+SurrealDB's Unicode collation (`COLLATE`): it ignores case differences and sorts
+accented letters next to their base letters (`Álamo`, `alpha`, `Beta`, `zebra`,
+`Zed`). It does **not** do natural ordering of numbers inside text (`Item 10`
+comes before `Item 2`) and has no locale-specific tuning.
 
-## Exclusão lógica
+### Price range
 
-`DELETE` em produto ou variante não apaga o registro: marca `active = false`, porque pedidos e carrinhos apontam para eles. Itens inativos somem do catálogo público (`GET /products`, `/products/{id}`, `/products/{id}/variants`) e não entram no carrinho nem no checkout. Para reativar, use o `PUT` com `"active": true`; os ids de quem foi desativado se descobrem em `GET /admin/products?active=false` (produtos) e `GET /admin/products/{id}` (variantes, com o `active` de cada uma). A listagem de admin vem ordenada por nome (e id, em empate) e aceita `sort=name` (padrão) ou `sort=newest` (do mais recente para o mais antigo), `limit` (1 a 200, padrão 50) e `offset`; parâmetros inválidos devolvem `422`. O `stock` do `PUT` é um valor absoluto: um checkout simultâneo pode ser sobrescrito.
+Each product in `GET /products` carries `price_from` (the lowest price among its
+**active** variants) and `price_to` (the highest), in units. A client can show
+"from X" only when the two differ. Inactive variants do not count, because they
+cannot be bought; zero stock does not remove a variant from the calculation. A
+product with no active variant has both as `null`. The fields are added to the
+usual shape (`id`, `name`, `description`, `active`, `created_at`); only the
+public list has them.
 
-## Checkout
+### Pagination and totals
 
-`POST /orders` roda em uma única transação: revalida que variante e produto estão ativos, baixa o estoque (`UPDATE ... WHERE stock >= quantity`), cria o pedido `pending` com um retrato de nome, SKU e preço de cada item, e esvazia o carrinho. Se qualquer passo falhar, nada é gravado. Compras simultâneas do mesmo item colidem na escrita; a transação perdedora é repetida automaticamente (até 5 tentativas, com pausa aleatória), então quem perde a última unidade recebe `409` e nunca `500`. O cancelamento de pedido usa a mesma repetição.
+Pagination is **optional** on the public list: without `limit`, `GET /products`
+returns every active product (there is no default limit that would cut the
+catalog). With `?limit=` (1 to 200) and `?offset=` (from 0) it returns a page;
+`offset` alone returns the rest from that point. Pages follow `sort` and never
+include inactive products. Invalid values return `422`.
 
-## Estrutura
+The body stays a plain list, and the `X-Total-Count` header carries how many
+items exist in total, regardless of the page (`0` if there are none). The
+admin lists (`GET /admin/products` and `GET /admin/orders`) send it too, and
+there the total **respects the filter** (`?active=` on products, `?status=` on
+orders) and **ignores `limit` and `offset`**. The count and the page are two
+separate reads, so a record created between them can leave the total off by one.
+
+### Creation date
+
+Every product has a `created_at`, written by the application on creation, that
+never changes afterwards (editing, deactivating and reactivating keep it).
+Products created **before** the field existed have `created_at: null`, because
+the real date was not stored and is not invented; under `?sort=newest` they come
+last.
+
+## Cart and checkout
+
+**Names on items.** Cart and order items carry `name` (the **variant's** name;
+the default variant, created together with the product, is called `Default`) and
+`product_name` (the **product's** name). In the **cart** `product_name` is the
+current name, so renaming a product shows up at once. In **orders** it is a
+snapshot from the moment of purchase, like the variant name, the SKU and the
+price: renaming the product later does not change an order already placed. This
+applies to customer and admin responses. Order items created **before** the field
+existed have `product_name: null`, because the name from that time was not stored
+and is not invented.
+
+**Unavailable items.** Cart responses (`GET /cart`, `POST /cart/items`, `PUT` and
+`DELETE /cart/items/{variant_id}`) flag what cannot be bought right now:
+
+- each item has `available` and `unavailable_reason`: `null` when available,
+  `"inactive"` if the product or variant was deactivated, `"insufficient_stock"`
+  if the current stock is lower than the quantity (including zero stock; a
+  quantity equal to the stock is still valid);
+- the cart has `can_checkout`: `true` only if it has items and all of them are
+  available.
+
+The `total` still adds up every item, available or not, and no item is removed
+on its own. It is a snapshot: the checkout is what decides, and it still refuses
+with `409` if something changed between reading the cart and buying.
+
+**Checkout.** `POST /orders` runs in a single transaction: it re-validates that
+the variant and product are active, decrements the stock
+(`UPDATE ... WHERE stock >= quantity`), creates the `pending` order with a
+snapshot of each item's name, SKU and price, and empties the cart. If any step
+fails, nothing is written. Simultaneous purchases of the same item collide on
+write; the losing transaction is retried automatically (up to 5 attempts, with a
+random pause), so whoever loses the last unit gets a `409` and never a `500`.
+Cancelling an order uses the same retry.
+
+## Orders and payment
+
+**Status cycle:** `pending` → `paid` or `cancelled`; `paid` → `shipped` →
+`delivered`. `cancelled` and `delivered` are final. `PUT /admin/orders/{id}/status`
+takes `{"status": "paid"}` and returns `409` for any transition outside the
+cycle. Cancelling a pending order returns the stock; a paid order cannot be
+cancelled (there are no refunds). Customers can still pay and cancel their own
+orders, but only while the order is `pending`.
+
+```
+pending ──► paid ──► shipped ──► delivered
+   │
+   └──► cancelled
+```
+
+**Payment is simulated.** `POST /orders/{id}/pay` only switches the status from
+`pending` to `paid`, with no gateway and no card data. Stock does not change (it
+was decremented at checkout). Only a pending order can be paid; a `paid` or
+`cancelled` one returns `409`. There are no refunds, so a paid order **cannot be
+cancelled**. Paying and cancelling at the same time has a single winner.
+
+**Payment date.** Every order has `paid_at`: the instant it became `paid`,
+written by the database in the same command that changes the status (both on
+`POST /orders/{id}/pay` and on `PUT /admin/orders/{id}/status`). It is `null`
+until the order is paid and on cancelled orders. Shipping and delivering do not
+change it. Orders paid **before** the field existed have `paid_at: null`, because
+the real date was not stored and is not invented.
+
+**Admin list.** `GET /admin/orders` lists from newest to oldest, with `limit`
+(1 to 200, default 50) and `offset`. Each order carries only the owner's
+`customer_id`, with no personal data. Invalid parameters return `422`.
+
+## Conventions
+
+**Currency.** The store runs on **units** (singular: *unit*), always whole
+numbers with no subunit. The value fields are `price`, `unit_price`, `line_total`
+and `total` (e.g. `"price": 25` = 25 units). The whole API answers in English.
+
+**Validation.** JSON bodies go through the `ValidatedJson` extractor (the
+`validator` crate). A malformed body or a broken rule returns `422` with
+`{"error": "field: message"}`, never echoing the value that was sent (LGPD, the
+Brazilian data-protection law). Rules: username of 3 to 32 characters (letters,
+digits, `.`, `-` and `_`), non-empty names (max 100), non-negative price and
+stock, quantity >= 1, birthday not in the future, password of 8 to 128
+characters.
+
+## Project layout
 
 ```
 src/
-├── main.rs         # rotas e inicialização
-├── db.rs           # conexão e schema
+├── main.rs         # routes and startup
+├── db.rs           # connection and schema
 ├── state.rs        # AppState
-├── error.rs        # AppError e respostas HTTP
-├── executor.rs     # abstração sobre conexão e transação
-├── extractors.rs   # AuthCustomer e AuthAdmin
-├── handlers/       # camada HTTP
-├── services/       # regras de negócio
-├── repositories/   # acesso ao SurrealDB
-└── models/         # tipos de entrada e saída
-schema.surql        # definição das tabelas
+├── error.rs        # AppError and HTTP responses
+├── executor.rs     # abstraction over connection and transaction
+├── extractors.rs   # AuthCustomer, AuthAdmin, AuthUser, ValidatedJson
+├── handlers/       # HTTP layer
+├── services/       # business rules
+├── repositories/   # SurrealDB access
+├── models/         # input and output types
+└── tests/          # integration tests
+schema.surql        # table definitions
 ```
 
-## Moeda
-
-A loja opera em **unidades** (singular: *unidade*), sempre números inteiros e sem subunidade. Os campos de valor são `price`, `unit_price`, `line_total` e `total` (ex.: `"price": 25` = 25 unidades). Toda a API responde em inglês.
-
-## Validação
-
-Os corpos JSON passam pelo extractor `ValidatedJson` (crate `validator`). Corpo malformado ou regra violada devolve `422` com `{"error": "campo: mensagem"}`, sem ecoar o valor enviado (LGPD). Regras: username de 3 a 32 caracteres (letras, números, `.`, `-` e `_`), nomes não vazios (máx. 100), preço e estoque não negativos, quantidade >= 1, data de nascimento fora do futuro, senha de 8 a 128 caracteres.
-
-## Testes
+## Tests
 
 ```bash
 cargo test
 ```
 
-Os testes sobem o app completo (rotas, services e schema) com um banco SurrealKV novo num diretório temporário e chamam o `Router` em memória, sem abrir porta. Não tocam em `data/rust-store`. Cobrem autenticação (inclusive refresh simultâneo), catálogo (inclusive o admin de inativos), carrinho (inclusive itens indisponíveis), checkout (rollback e corrida pelo último item), cancelamento, pagamento e rotas de admin de pedidos (inclusive simultâneos) e limpeza de sessões.
+The tests boot the whole app (routes, services and schema) against a fresh
+SurrealKV database in a temporary directory and call the `Router` in memory,
+without opening a port. They never touch `data/rust-store`. They cover
+authentication (including concurrent refresh), the catalog (including the admin
+view of inactive items), the cart (including unavailable items), checkout
+(rollback and the race for the last item), cancellation, payment, the admin
+order routes (including concurrent ones) and session cleanup.
 
-## Pagamento
+## Known limitations
 
-O pagamento é simulado: `POST /orders/{id}/pay` só troca o status de `pending` para `paid`, sem gateway nem dados de cartão. O estoque não muda (já foi baixado no checkout). Só pedido pendente paga; pedido `paid` ou `cancelled` devolve `409`. Não há reembolso, então um pedido pago **não pode ser cancelado**. Pagar e cancelar ao mesmo tempo tem um único vencedor.
+- There is no real payment gateway and no refunds.
+- Variants have no pagination, and numbers inside names are not ordered naturally.
 
-## Data do pagamento
+## Contributing and releases
 
-Todo pedido traz `paid_at`: o instante em que ele virou `paid`, gravado pelo banco no mesmo comando que troca o status (tanto no `POST /orders/{id}/pay` quanto no `PUT /admin/orders/{id}/status`). É `null` enquanto o pedido não foi pago e em pedido cancelado. Enviar e entregar não alteram a data. Pedidos pagos **antes** do campo existir ficam com `paid_at: null`, porque a data real não foi guardada e não é inventada.
+Commits follow [Conventional Commits](https://www.conventionalcommits.org)
+(`feat:`, `fix:`, `docs:`, and `!` or a `BREAKING CHANGE:` footer for breaking
+changes). [Release Please](https://github.com/googleapis/release-please-action)
+reads them on every push to `main`, keeps a release pull request open with the
+next version and the `CHANGELOG.md`, and tags and publishes the release when that
+pull request is merged.
 
-## Ordem da listagem pública
+## License
 
-`GET /products` devolve os produtos ativos por nome e, em empate, por id. Com `?sort=newest` vêm do mais recente para o mais antigo, e os produtos sem data de criação ficam no fim; `?sort=name` é o padrão. Valor de `sort` desconhecido devolve `422`, e parâmetros que a rota não conhece são ignorados.
-
-As variantes (`GET /products/{id}/variants`, o `variants` do detalhe público e o do detalhe de admin) vêm por nome e, em empate, por SKU (que é único, então a ordem é sempre a mesma). Não há `sort` nem paginação para elas. A ordenação por nome usa a colação Unicode do SurrealDB (`COLLATE`): ignora diferenças de maiúsculas e minúsculas e coloca letras acentuadas junto das demais (`Álamo`, `alpha`, `Beta`, `zebra`, `Zed`), e vale para produtos e variantes. Ela **não** faz ordem natural de números dentro do texto (`Item 10` vem antes de `Item 2`) nem tem ajuste específico para o português. Nomes que só diferem na caixa ficam juntos, numa ordem estável entre chamadas.
-
-## Faixa de preço na listagem pública
-
-Cada produto de `GET /products` traz `price_from` (o menor preço entre as variantes **ativas**) e `price_to` (o maior), em unidades. O cliente mostra "from X" só quando os dois diferem. As variantes inativas não contam, porque não podem ser compradas; estoque zero não tira a variante do cálculo. Se o produto não tem nenhuma variante ativa, os dois valem `null`. Os campos são acrescentados ao formato de sempre (`id`, `name`, `description`, `active`, `created_at`), que não mudou. Só a listagem pública os traz: o detalhe já lista as variantes, e as respostas de admin e de criar ou editar produto ficam como estavam.
-
-## Paginação da listagem pública
-
-A paginação é **opcional**: sem `limit`, `GET /products` devolve todos os ativos, como sempre devolveu (não há limite padrão que corte o catálogo). Com `?limit=` (1 a 200) e `?offset=` (a partir de 0) a rota devolve uma página; só `offset` devolve o resto a partir dali. As páginas seguem a ordem de `sort` e nunca incluem produtos inativos. Valores inválidos devolvem `422`.
-
-O corpo continua sendo a lista simples, e o cabeçalho `X-Total-Count` traz quantos produtos ativos existem no total, independente da página (`0` se não houver nenhum). A contagem e a página são duas leituras separadas: se um produto for criado entre elas, o total pode ficar defasado em uma unidade.
-
-## Total nas listagens de admin
-
-`GET /admin/products` e `GET /admin/orders` trazem o cabeçalho `X-Total-Count`, e o corpo continua sendo a lista simples. O total **respeita o filtro** (`?active=` nos produtos, `?status=` nos pedidos) e **ignora `limit` e `offset`**: é quantos itens existem naquela visão, para saber quantas páginas ela tem. Sem filtro conta tudo (produtos ativos e inativos, pedidos de todos os status). Se nada casar, o total é `0`, e não ausente. A contagem e a página são duas leituras separadas, então um registro criado entre elas pode deixar o total defasado em uma unidade.
-
-## Data de criação do produto
-
-Todo produto traz `created_at`, gravado pela aplicação quando ele é criado e que nunca muda depois (editar, desativar e reativar preservam a data). Produtos criados **antes** do campo existir ficam com `created_at: null`, porque a data real não foi guardada e não é inventada; em `?sort=newest` eles aparecem no fim.
-
-## Pedidos no admin
-
-Ciclo de status: `pending` → `paid` ou `cancelled`; `paid` → `shipped` → `delivered`. `cancelled` e `delivered` são finais. `PUT /admin/orders/{id}/status` recebe `{"status": "paid"}` e devolve `409` para qualquer transição fora do ciclo. Cancelar um pedido pendente devolve o estoque; pedido pago não cancela (sem reembolso). O cliente continua podendo pagar e cancelar o que é seu, mas só enquanto o pedido está `pending`.
-
-`GET /admin/orders` lista do mais recente para o mais antigo, com `limit` (1 a 200, padrão 50) e `offset`. Cada pedido traz só o `customer_id` do dono, sem dados pessoais. Parâmetros inválidos devolvem `422`.
-
-## Limitações conhecidas
-
-Não há gateway de pagamento real nem reembolso.
+[The Unlicense](LICENSE): public domain, do whatever you want with it.
