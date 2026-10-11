@@ -75,6 +75,10 @@ O login é por `username` e senha, sem e-mail. O `username` não diferencia mai�
 - Senhas são guardadas com argon2; tokens, apenas como hash SHA-256.
 - O cliente é sempre identificado pelo token, nunca por um id na URL.
 
+## Nome do produto nos itens
+
+Os itens do carrinho e dos pedidos trazem `name` (o nome da **variante**; a variante padrão, criada junto com o produto, se chama `Default`) e `product_name` (o nome do **produto**). No **carrinho**, `product_name` é o nome atual, então renomear o produto aparece na hora. Nos **pedidos**, é um retrato do momento da compra, como o nome da variante, o SKU e o preço: renomear o produto depois não muda um pedido já feito. Vale para as respostas do cliente e do admin. Itens de pedido criados **antes** do campo existir vêm com `product_name: null`, porque o nome daquela época não foi guardado e não é inventado.
+
 ## Itens indisponíveis no carrinho
 
 As respostas de carrinho (`GET /cart`, `POST /cart/items`, `PUT` e `DELETE /cart/items/{variant_id}`) sinalizam o que não pode ser comprado agora:

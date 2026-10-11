@@ -71,6 +71,8 @@ DEFINE TABLE IF NOT EXISTS order_item SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS order            ON order_item TYPE record<order>;
 DEFINE FIELD IF NOT EXISTS variant          ON order_item TYPE record<variant>;
 DEFINE FIELD IF NOT EXISTS name             ON order_item TYPE string;
+-- Retrato do nome do produto na compra. NONE em itens criados antes deste campo existir.
+DEFINE FIELD IF NOT EXISTS product_name     ON order_item TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS sku              ON order_item TYPE string;
 DEFINE FIELD IF NOT EXISTS unit_price ON order_item TYPE int ASSERT $value >= 0;
 DEFINE FIELD IF NOT EXISTS quantity         ON order_item TYPE int ASSERT $value >= 1;

@@ -106,15 +106,17 @@ async fn build_view(ex: &Executor<'_>, cart: RecordId) -> Result<CartView, AppEr
             .ok_or_else(overflow)?;
         total = total.checked_add(line_total).ok_or_else(overflow)?;
 
-        let product_active = products
+        // Produto nunca é apagado de verdade (a exclusão é lógica): faltar é inconsistência.
+        let product = products
             .get(&id_to_string(&variant.product))
-            .is_some_and(|product| product.active);
-        let reason = unavailable_reason(variant, product_active, item.quantity);
+            .ok_or(AppError::Internal("cart product not found".to_string()))?;
+        let reason = unavailable_reason(variant, product.active, item.quantity);
         all_available &= reason.is_none();
 
         views.push(CartItemView {
             variant_id: id_to_string(&variant.id),
             product_id: id_to_string(&variant.product),
+            product_name: product.name.clone(),
             name: variant.name.clone(),
             sku: variant.sku.clone(),
             unit_price: variant.price,

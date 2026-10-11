@@ -640,3 +640,160 @@ async fn customer_payment_records_when_the_order_was_paid() {
         .await;
     assert!(cancelled["paid_at"].is_null());
 }
+
+async fn rename(app: &TestApp, admin: &str, product_id: &str, name: &str) {
+    let (status, _) = app
+        .send(
+            "PUT",
+            &format!("/products/{product_id}"),
+            Some(admin),
+            Some(json!({ "name": name, "description": "d", "active": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn order_items_keep_the_product_name_from_the_time_of_purchase() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let tea = app.setup_product(&admin, "Oolong Tea", 45, 20).await;
+    let order_id = place_order(&app, &customer, &tea, 1).await;
+
+    rename(&app, &admin, &tea.product_id, "Oolong Tea Reserve").await;
+
+    // O pedido continua com o nome de quando foi comprado, em todas as visões.
+    let (_, order) = app
+        .send("GET", &format!("/orders/{order_id}"), Some(&customer), None)
+        .await;
+    assert_eq!(order["items"][0]["product_name"], "Oolong Tea");
+    assert_eq!(order["items"][0]["name"], "Default");
+    let (_, list) = app.send("GET", "/orders", Some(&customer), None).await;
+    assert_eq!(list[0]["items"][0]["product_name"], "Oolong Tea");
+    let (_, admin_order) = app
+        .send(
+            "GET",
+            &format!("/admin/orders/{order_id}"),
+            Some(&admin),
+            None,
+        )
+        .await;
+    assert_eq!(admin_order["items"][0]["product_name"], "Oolong Tea");
+    let (_, admin_list) = app.send("GET", "/admin/orders", Some(&admin), None).await;
+    assert_eq!(admin_list[0]["items"][0]["product_name"], "Oolong Tea");
+
+    // Uma compra feita DEPOIS da renomeação já nasce com o nome novo.
+    let later_id = place_order(&app, &customer, &tea, 1).await;
+    let (_, later) = app
+        .send("GET", &format!("/orders/{later_id}"), Some(&customer), None)
+        .await;
+    assert_eq!(later["items"][0]["product_name"], "Oolong Tea Reserve");
+}
+
+#[tokio::test]
+async fn the_checkout_response_and_every_order_action_carry_the_product_name() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let mug = app.setup_product(&admin, "Mug", 10, 20).await;
+    let cap = app.setup_product(&admin, "Cap", 20, 20).await;
+
+    // A resposta do próprio checkout, com dois produtos diferentes.
+    app.add_to_cart(&customer, &mug, 1).await;
+    app.add_to_cart(&customer, &cap, 2).await;
+    let (status, order) = app.send("POST", "/orders", Some(&customer), None).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let mut names: Vec<&str> = order["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["product_name"].as_str().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["Cap", "Mug"]);
+
+    let order_id = order["id"].as_str().unwrap();
+    let (_, paid) = app
+        .send(
+            "POST",
+            &format!("/orders/{order_id}/pay"),
+            Some(&customer),
+            None,
+        )
+        .await;
+    assert!(
+        paid["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["product_name"].is_string())
+    );
+
+    let cancelled_id = place_order(&app, &customer, &mug, 1).await;
+    let (_, cancelled) = app
+        .send(
+            "POST",
+            &format!("/orders/{cancelled_id}/cancel"),
+            Some(&customer),
+            None,
+        )
+        .await;
+    assert_eq!(cancelled["items"][0]["product_name"], "Mug");
+
+    let (_, shipped) = app
+        .send(
+            "PUT",
+            &format!("/admin/orders/{order_id}/status"),
+            Some(&admin),
+            Some(json!({ "status": "shipped" })),
+        )
+        .await;
+    assert!(
+        shipped["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["product_name"].is_string())
+    );
+}
+
+#[tokio::test]
+async fn order_items_created_before_the_field_existed_read_as_null() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let mug = app.setup_product(&admin, "Mug", 10, 20).await;
+    let (_, me) = app.send("GET", "/me", Some(&customer), None).await;
+    let customer_id = me["id"].as_str().unwrap();
+
+    // Um pedido "antigo": o item é gravado direto no banco, sem `product_name`.
+    app.db
+        .query(format!(
+            "CREATE order:legacy SET customer = customer:`{customer_id}`, total = 10;
+             CREATE order_item SET order = order:legacy, variant = variant:`{}`,
+                 name = 'Default', sku = 'OLD-1', unit_price = 10, quantity = 1;",
+            mug.variant_id
+        ))
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+
+    let (status, order) = app
+        .send("GET", "/orders/legacy", Some(&customer), None)
+        .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(order["items"][0]["product_name"].is_null(), "{order}");
+    // O resto do item segue legível, e a listagem inteira continua funcionando.
+    assert_eq!(order["items"][0]["name"], "Default");
+    assert_eq!(order["items"][0]["sku"], "OLD-1");
+    let (status, list) = app.send("GET", "/orders", Some(&customer), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    let (status, _) = app
+        .send("GET", "/admin/orders/legacy", Some(&admin), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}

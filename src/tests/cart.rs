@@ -393,3 +393,81 @@ async fn can_checkout_agrees_with_what_the_checkout_does() {
     let (accepted, _) = app.send("POST", "/orders", Some(&customer), None).await;
     assert_eq!(accepted, StatusCode::CREATED);
 }
+
+async fn rename_product(app: &TestApp, admin: &str, product_id: &str, name: &str) {
+    let (status, _) = app
+        .send(
+            "PUT",
+            &format!("/products/{product_id}"),
+            Some(admin),
+            Some(json!({ "name": name, "description": "d", "active": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn cart_items_carry_the_current_product_name_next_to_the_variant_name() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let tea = app.setup_product(&admin, "Oolong Tea", 45, 9).await;
+    app.add_to_cart(&customer, &tea, 1).await;
+
+    let cart = cart_of(&app, &customer).await;
+    assert_eq!(cart["items"][0]["product_name"], "Oolong Tea");
+    // O `name` continua sendo o da variante (a padrão se chama "Default").
+    assert_eq!(cart["items"][0]["name"], "Default");
+
+    // O carrinho mostra o nome ATUAL: renomear o produto aparece na hora.
+    rename_product(&app, &admin, &tea.product_id, "Oolong Tea Reserve").await;
+    let renamed = cart_of(&app, &customer).await;
+    assert_eq!(renamed["items"][0]["product_name"], "Oolong Tea Reserve");
+    assert_eq!(renamed["items"][0]["name"], "Default");
+}
+
+#[tokio::test]
+async fn each_cart_line_names_its_own_product() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let mug = app.setup_product(&admin, "Mug", 10, 9).await;
+    let cap = app.setup_product(&admin, "Cap", 20, 9).await;
+    app.add_to_cart(&customer, &mug, 1).await;
+    app.add_to_cart(&customer, &cap, 1).await;
+
+    let cart = cart_of(&app, &customer).await;
+
+    let name_of = |variant_id: &str| {
+        cart["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["variant_id"] == variant_id)
+            .unwrap()["product_name"]
+            .clone()
+    };
+    assert_eq!(name_of(&mug.variant_id), "Mug");
+    assert_eq!(name_of(&cap.variant_id), "Cap");
+}
+
+#[tokio::test]
+async fn a_deactivated_product_keeps_its_name_in_the_cart() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let customer = app.customer("ana").await;
+    let mug = app.setup_product(&admin, "Mug", 10, 9).await;
+    app.add_to_cart(&customer, &mug, 1).await;
+    app.send(
+        "DELETE",
+        &format!("/products/{}", mug.product_id),
+        Some(&admin),
+        None,
+    )
+    .await;
+
+    let cart = cart_of(&app, &customer).await;
+
+    assert_eq!(cart["items"][0]["unavailable_reason"], "inactive");
+    assert_eq!(cart["items"][0]["product_name"], "Mug");
+}

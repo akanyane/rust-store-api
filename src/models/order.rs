@@ -29,6 +29,8 @@ pub struct OrderItemRecord {
     pub order: RecordId,
     pub variant: RecordId,
     pub name: String,
+    /// `None` em itens criados antes do campo existir.
+    pub product_name: Option<String>,
     pub sku: String,
     pub unit_price: i64,
     pub quantity: i32,
@@ -39,6 +41,7 @@ pub struct NewOrderItem {
     pub order: RecordId,
     pub variant: RecordId,
     pub name: String,
+    pub product_name: String,
     pub sku: String,
     pub unit_price: i64,
     pub quantity: i32,
@@ -58,6 +61,8 @@ pub struct OrderView {
 pub struct OrderItemView {
     pub variant_id: String,
     pub name: String,
+    /// Nome do produto na hora da compra (`null` em pedidos antigos, que não o guardaram).
+    pub product_name: Option<String>,
     pub sku: String,
     pub unit_price: i64,
     pub quantity: i32,
@@ -72,6 +77,7 @@ impl OrderItemView {
         Some(OrderItemView {
             variant_id: id_to_string(&record.variant),
             name: record.name,
+            product_name: record.product_name,
             sku: record.sku,
             unit_price: record.unit_price,
             quantity: record.quantity,

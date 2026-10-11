@@ -36,6 +36,8 @@ pub enum UnavailableReason {
 pub struct CartItemView {
     pub variant_id: String,
     pub product_id: String,
+    /// Nome ATUAL do produto (o `name` é o da variante).
+    pub product_name: String,
     pub name: String,
     pub sku: String,
     pub unit_price: i64,

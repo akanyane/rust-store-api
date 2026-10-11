@@ -70,14 +70,22 @@ fn build_view(order: OrderRecord, items: Vec<OrderItemRecord>) -> Result<OrderVi
     })
 }
 
-fn order_total(lines: &[(VariantRecord, i32)]) -> Result<i64, AppError> {
+/// Uma linha comprada: a variante já com o estoque baixado, o nome do produto (para o retrato
+/// do pedido) e a quantidade.
+struct PurchasedLine {
+    variant: VariantRecord,
+    product_name: String,
+    quantity: i32,
+}
+
+fn order_total(lines: &[PurchasedLine]) -> Result<i64, AppError> {
     lines
         .iter()
-        .try_fold(0_i64, |total, (variant, quantity)| {
-            variant
+        .try_fold(0_i64, |total, line| {
+            line.variant
                 .price
-                .checked_mul(i64::from(*quantity))
-                .and_then(|line| total.checked_add(line))
+                .checked_mul(i64::from(line.quantity))
+                .and_then(|amount| total.checked_add(amount))
         })
         .ok_or_else(|| AppError::Internal("overflow in order total".to_string()))
 }
@@ -135,13 +143,19 @@ async fn checkout_in_tx(ex: &Executor<'_>, customer_id: &str) -> Result<OrderVie
     .ok_or_else(|| AppError::Internal("failed to create order".to_string()))?;
 
     let mut items = Vec::with_capacity(lines.len());
-    for (variant, quantity) in lines {
+    for line in lines {
+        let PurchasedLine {
+            variant,
+            product_name,
+            quantity,
+        } = line;
         let item = order_item_repo::create(
             ex,
             NewOrderItem {
                 order: order.id.clone(),
                 variant: variant.id,
                 name: variant.name,
+                product_name,
                 sku: variant.sku,
                 unit_price: variant.price,
                 quantity,
@@ -164,7 +178,7 @@ async fn checkout_in_tx(ex: &Executor<'_>, customer_id: &str) -> Result<OrderVie
 async fn reserve_stock(
     ex: &Executor<'_>,
     cart_items: &[CartItemRecord],
-) -> Result<Vec<(VariantRecord, i32)>, AppError> {
+) -> Result<Vec<PurchasedLine>, AppError> {
     let variant_ids = cart_items.iter().map(|item| item.variant.clone()).collect();
     let variants: HashMap<String, VariantRecord> = variant_repo::find_by_ids(ex, variant_ids)
         .await?
@@ -188,20 +202,24 @@ async fn reserve_stock(
             .get(&id_to_string(&item.variant))
             .ok_or_else(|| AppError::Internal("cart variant not found".to_string()))?;
 
-        let product_active = products
+        let product = products
             .get(&id_to_string(&variant.product))
-            .is_some_and(|product| product.active);
-        if !variant.active || !product_active {
+            .filter(|product| product.active);
+        let Some(product) = product.filter(|_| variant.active) else {
             return Err(AppError::Conflict(format!(
                 "Item unavailable: {}",
                 variant.sku
             )));
-        }
+        };
 
         let updated = variant_repo::decrement_stock(ex, item.variant.clone(), item.quantity)
             .await?
             .ok_or_else(|| AppError::Conflict(format!("Insufficient stock for {}", variant.sku)))?;
-        lines.push((updated, item.quantity));
+        lines.push(PurchasedLine {
+            variant: updated,
+            product_name: product.name.clone(),
+            quantity: item.quantity,
+        });
     }
 
     Ok(lines)
