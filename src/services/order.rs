@@ -8,8 +8,8 @@ use crate::error::AppError;
 use crate::executor::Executor;
 use crate::models::cart_item::CartItemRecord;
 use crate::models::order::{
-    AdminOrderView, ListOrdersQuery, NewOrder, NewOrderItem, OrderItemRecord, OrderItemView,
-    OrderPage, OrderRecord, OrderStatus, OrderView, StatusChange,
+    AdminOrderView, ListOrdersQuery, NewOrder, NewOrderItem, OrderFilter, OrderItemRecord,
+    OrderItemView, OrderPage, OrderRecord, OrderStatus, OrderView, StatusChange, search_term,
 };
 use crate::models::product::ProductRecord;
 use crate::models::variant::VariantRecord;
@@ -384,16 +384,19 @@ async fn pay_order_once(
     build_view(paid, items)
 }
 
-/// Pedidos de todos os clientes, com filtro opcional de status e paginação, e o total que casa
-/// com o filtro (independente de `limit` e `offset`).
+/// Pedidos de todos os clientes, com filtro opcional de status, busca por prefixo do número do
+/// pedido ou do id do cliente, e paginação, e o total que casa com o filtro e a busca
+/// (independente de `limit` e `offset`).
 pub async fn admin_list_orders(
     db: &Surreal<Any>,
     query: ListOrdersQuery,
 ) -> Result<(Vec<AdminOrderView>, i64), AppError> {
     let ex = Executor::Db(db);
     let status = query.status.map(|status| status.as_str().to_string());
+    let search = search_term(query.q.as_deref());
     let page = OrderPage {
         status: status.clone(),
+        search: search.clone(),
         limit: query.limit.unwrap_or(DEFAULT_PAGE_SIZE),
         offset: query.offset.unwrap_or(0),
     };
@@ -405,7 +408,7 @@ pub async fn admin_list_orders(
         .collect();
     let views = views_for(&ex, orders).await?;
 
-    let total = order_repo::count_matching(&ex, status).await?;
+    let total = order_repo::count_matching(&ex, OrderFilter { status, search }).await?;
 
     let views = owners
         .into_iter()

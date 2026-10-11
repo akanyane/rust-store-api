@@ -2,7 +2,7 @@ use surrealdb::types::RecordId;
 
 use crate::executor::Executor;
 use crate::models::CountRow;
-use crate::models::order::{NewOrder, OrderPage, OrderRecord, StatusChange};
+use crate::models::order::{NewOrder, OrderFilter, OrderPage, OrderRecord, StatusChange};
 
 pub async fn create(ex: &Executor<'_>, data: NewOrder) -> surrealdb::Result<Option<OrderRecord>> {
     ex.create("order", data).await
@@ -71,10 +71,13 @@ pub async fn pay_if_pending(
 }
 
 /// Pedidos de todos os clientes, do mais recente para o mais antigo, com filtro opcional
-/// de status e paginação.
+/// de status, busca por prefixo do id do pedido ou do cliente, e paginação.
 pub async fn find_page(ex: &Executor<'_>, page: OrderPage) -> surrealdb::Result<Vec<OrderRecord>> {
     ex.query_all(
         "SELECT * FROM order WHERE ($page.status = NONE OR status = $page.status) \
+         AND ($page.search = NONE \
+              OR string::starts_with(<string> record::id(id), $page.search) \
+              OR string::starts_with(<string> record::id(customer), $page.search)) \
          ORDER BY created_at DESC LIMIT $page.limit START $page.offset",
         "page",
         page,
@@ -101,15 +104,19 @@ pub async fn change_status(
     Ok(rows.into_iter().next())
 }
 
-/// Quantos pedidos casam com o filtro de status (sem filtro, todos), independente de
-/// página. É o total da listagem de admin.
-pub async fn count_matching(ex: &Executor<'_>, status: Option<String>) -> surrealdb::Result<i64> {
+/// Quantos pedidos casam com o filtro de status e a busca (sem filtro, todos), independente
+/// de página. É o total da listagem de admin.
+pub async fn count_matching(ex: &Executor<'_>, filter: OrderFilter) -> surrealdb::Result<i64> {
     let rows: Vec<CountRow> = ex
         .query_all(
             "SELECT count() AS count FROM order \
-             WHERE ($filter = NONE OR status = $filter) GROUP ALL",
+             WHERE ($filter.status = NONE OR status = $filter.status) \
+             AND ($filter.search = NONE \
+                  OR string::starts_with(<string> record::id(id), $filter.search) \
+                  OR string::starts_with(<string> record::id(customer), $filter.search)) \
+             GROUP ALL",
             "filter",
-            status,
+            filter,
         )
         .await?;
     // Sem nenhum registro o `GROUP ALL` pode não devolver linha nenhuma.

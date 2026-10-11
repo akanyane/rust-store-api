@@ -139,6 +139,9 @@ pub struct UpdateOrderStatus {
 #[derive(Debug, Deserialize, Validate)]
 pub struct ListOrdersQuery {
     pub status: Option<OrderStatus>,
+    /// Número do pedido (com ou sem `#`) ou id do cliente, por prefixo.
+    #[validate(length(max = 64, message = "must be at most 64 characters"))]
+    pub q: Option<String>,
     #[validate(range(min = 1, max = 200, message = "must be between 1 and 200"))]
     pub limit: Option<i64>,
     #[validate(range(min = 0, message = "must not be negative"))]
@@ -157,8 +160,24 @@ pub struct AdminOrderView {
 #[derive(Debug, SurrealValue)]
 pub struct OrderPage {
     pub status: Option<String>,
+    /// Já normalizado (ver `search_term`): prefixo do id do pedido ou do cliente.
+    pub search: Option<String>,
     pub limit: i64,
     pub offset: i64,
+}
+
+/// Parâmetro único da contagem: o mesmo filtro da listagem, sem a página.
+#[derive(Debug, SurrealValue)]
+pub struct OrderFilter {
+    pub status: Option<String>,
+    pub search: Option<String>,
+}
+
+/// O termo da busca como o banco o compara: sem espaços nas pontas, sem o `#` do número
+/// mostrado na tela e em minúsculas (os ids são minúsculos). Vazio vira `None` (sem busca).
+pub fn search_term(raw: Option<&str>) -> Option<String> {
+    let term = raw?.trim().trim_start_matches('#').trim().to_lowercase();
+    (!term.is_empty()).then_some(term)
 }
 
 /// Parâmetro único da troca de status.

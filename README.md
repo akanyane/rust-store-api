@@ -138,7 +138,7 @@ Access is **public**, **customer** (Bearer token of a customer) or **admin**
 | GET | `/orders/{id}` | customer | One of the customer's orders |
 | POST | `/orders/{id}/cancel` | customer | Cancels a pending order and returns the stock |
 | POST | `/orders/{id}/pay` | customer | Simulated payment of a pending order |
-| GET | `/admin/orders` | admin | Lists every customer's orders (`?status=`, `?limit=`, `?offset=`; total in `X-Total-Count`) |
+| GET | `/admin/orders` | admin | Lists every customer's orders (`?status=`, `?q=`, `?limit=`, `?offset=`; total in `X-Total-Count`) |
 | GET | `/admin/orders/{id}` | admin | Any order |
 | PUT | `/admin/orders/{id}/status` | admin | Changes the order's status |
 | GET | `/admin/stats` | admin | Numbers for the admin dashboard: orders per status, revenue, product counts and low stock |
@@ -289,6 +289,17 @@ the real date was not stored and is not invented.
 **Admin list.** `GET /admin/orders` lists from newest to oldest, with `limit`
 (1 to 200, default 50) and `offset`. Each order carries only the owner's
 `customer_id`, with no personal data. Invalid parameters return `422`.
+
+**Search.** `?q=` finds orders by the **order number** shown on screen (the first 8
+characters of the id, with or without the `#`, or the whole id) or by the
+**customer id**, always as a **prefix** and ignoring case, surrounding spaces and a
+leading `#`. So `?q=%239FST3BCC`, `?q=9fst3bcc` and the full id all find the same
+order, and a customer id (or its start) finds all of that customer's orders. It
+combines with `status`, and `X-Total-Count` counts the whole search, regardless of
+`limit` and `offset`. An empty or blank `q` means no search, a term with no match
+is an empty list with a total of `0`, and a term over 64 characters is a `422`.
+The term is only ever compared as text (`%`, quotes and `*` have no special
+meaning). There is no search by customer name: the admin never sees one.
 
 ## Admin dashboard numbers
 

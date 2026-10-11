@@ -2,6 +2,7 @@
 //! banco SurrealKV novo num diretório temporário e dispara requisições em memória
 //! contra o `Router`, sem abrir porta.
 
+mod admin_order_search;
 mod admin_orders;
 mod admin_products;
 mod admin_stats;
