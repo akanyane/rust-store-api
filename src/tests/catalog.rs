@@ -786,3 +786,186 @@ async fn variants_sort_text_ignoring_case_and_accents() {
     assert_eq!(names_of(&detail["variants"]), expected);
     assert_eq!(names_of(&admin_detail["variants"]), expected);
 }
+
+/// Cria uma variante com preço próprio e devolve o id dela.
+async fn add_priced_variant(
+    app: &TestApp,
+    admin: &str,
+    product_id: &str,
+    name: &str,
+    sku: &str,
+    price: i64,
+) -> String {
+    let (status, created) = app
+        .send(
+            "POST",
+            &format!("/products/{product_id}/variants"),
+            Some(admin),
+            Some(json!({ "name": name, "sku": sku, "price": price, "stock": 5 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{name}");
+    created["id"].as_str().unwrap().to_string()
+}
+
+async fn deactivate_variant(app: &TestApp, admin: &str, product_id: &str, variant_id: &str) {
+    let (status, _) = app
+        .send(
+            "DELETE",
+            &format!("/products/{product_id}/variants/{variant_id}"),
+            Some(admin),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+}
+
+/// O item da listagem pública com o nome dado.
+async fn listed(app: &TestApp, query: &str, name: &str) -> serde_json::Value {
+    let (status, list) = app
+        .send("GET", &format!("/products{query}"), None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{query}");
+    list.as_array()
+        .unwrap()
+        .iter()
+        .find(|product| product["name"] == name)
+        .unwrap_or_else(|| panic!("{name} missing from {query}"))
+        .clone()
+}
+
+#[tokio::test]
+async fn a_product_with_one_variant_has_the_same_price_from_and_to() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    app.setup_product(&admin, "Mug", 25, 5).await;
+
+    let mug = listed(&app, "", "Mug").await;
+
+    assert_eq!(mug["price_from"], 25);
+    assert_eq!(mug["price_to"], 25);
+    // O formato de sempre continua lá.
+    for field in ["id", "name", "description", "active", "created_at"] {
+        assert!(mug.get(field).is_some(), "{field} missing");
+    }
+    assert_eq!(mug["active"], true);
+}
+
+#[tokio::test]
+async fn variants_with_different_prices_give_a_range() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let tea = app.setup_product(&admin, "Tea", 30, 5).await;
+    add_priced_variant(&app, &admin, &tea.product_id, "Small", "T-S", 12).await;
+    add_priced_variant(&app, &admin, &tea.product_id, "Large", "T-L", 55).await;
+
+    let item = listed(&app, "", "Tea").await;
+
+    assert_eq!(item["price_from"], 12);
+    assert_eq!(item["price_to"], 55);
+}
+
+#[tokio::test]
+async fn inactive_variants_never_count_towards_the_range() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let tea = app.setup_product(&admin, "Tea", 30, 5).await;
+    let cheap = add_priced_variant(&app, &admin, &tea.product_id, "Cheap", "T-C", 5).await;
+    let pricey = add_priced_variant(&app, &admin, &tea.product_id, "Pricey", "T-P", 99).await;
+    assert_eq!(listed(&app, "", "Tea").await["price_from"], 5);
+    assert_eq!(listed(&app, "", "Tea").await["price_to"], 99);
+
+    deactivate_variant(&app, &admin, &tea.product_id, &cheap).await;
+    deactivate_variant(&app, &admin, &tea.product_id, &pricey).await;
+
+    let item = listed(&app, "", "Tea").await;
+    assert_eq!(
+        item["price_from"], 30,
+        "the deactivated cheap variant must not count"
+    );
+    assert_eq!(
+        item["price_to"], 30,
+        "the deactivated pricey variant must not count"
+    );
+}
+
+#[tokio::test]
+async fn a_product_without_active_variants_is_listed_with_null_prices() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let mug = app.setup_product(&admin, "Mug", 25, 5).await;
+    deactivate_variant(&app, &admin, &mug.product_id, &mug.variant_id).await;
+
+    let item = listed(&app, "", "Mug").await;
+
+    assert!(item["price_from"].is_null());
+    assert!(item["price_to"].is_null());
+    assert_eq!(item["active"], true);
+    // Estoque zero não tira a variante do preço: ela continua ativa.
+    let cap = app.setup_product(&admin, "Cap", 40, 0).await;
+    let (status, _) = app
+        .send("GET", &format!("/products/{}", cap.product_id), None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed(&app, "", "Cap").await["price_from"], 40);
+}
+
+#[tokio::test]
+async fn editing_a_variant_price_shows_up_in_the_list() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    let mug = app.setup_product(&admin, "Mug", 25, 5).await;
+
+    let (status, _) = app
+        .send(
+            "PUT",
+            &format!("/products/{}/variants/{}", mug.product_id, mug.variant_id),
+            Some(&admin),
+            Some(json!({
+                "name": "Default",
+                "sku": format!("SKU-{}", mug.product_id),
+                "price": 31,
+                "stock": 5,
+                "active": true,
+            })),
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::OK);
+    let item = listed(&app, "", "Mug").await;
+    assert_eq!(item["price_from"], 31);
+    assert_eq!(item["price_to"], 31);
+}
+
+#[tokio::test]
+async fn each_product_gets_its_own_range_on_every_page_and_order() {
+    let app = TestApp::new().await;
+    let admin = app.admin().await;
+    app.setup_product(&admin, "Alpha", 10, 5).await;
+    let bravo = app.setup_product(&admin, "Bravo", 20, 5).await;
+    add_priced_variant(&app, &admin, &bravo.product_id, "Big", "B-1", 40).await;
+    app.setup_product(&admin, "Charlie", 7, 5).await;
+
+    for query in [
+        "",
+        "?sort=newest",
+        "?limit=1&offset=1",
+        "?sort=newest&limit=1&offset=1",
+    ] {
+        let (status, headers, body) =
+            super::send_full(&app.router, "GET", &format!("/products{query}"), None, None).await;
+        assert_eq!(status, StatusCode::OK, "{query}");
+        // A contagem total não muda por causa dos preços.
+        assert_eq!(headers.get("x-total-count").unwrap(), "3", "{query}");
+        for item in body.as_array().unwrap() {
+            let (from, to) = match item["name"].as_str().unwrap() {
+                "Alpha" => (10, 10),
+                "Bravo" => (20, 40),
+                "Charlie" => (7, 7),
+                other => panic!("unexpected product {other}"),
+            };
+            assert_eq!(item["price_from"], from, "{query}: {item}");
+            assert_eq!(item["price_to"], to, "{query}: {item}");
+        }
+    }
+}

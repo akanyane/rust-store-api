@@ -9,7 +9,7 @@ use crate::extractors::{AuthAdmin, ValidatedJson, ValidatedQuery};
 use crate::handlers::total_count;
 use crate::models::product::{
     CreateProduct, ListProductsQuery, ListPublicProductsQuery, Product, ProductDetail,
-    UpdateProduct,
+    ProductListItem, UpdateProduct,
 };
 use crate::services::product as product_service;
 use crate::state::AppState;
@@ -18,7 +18,7 @@ use crate::state::AppState;
 pub async fn list_products(
     State(state): State<AppState>,
     ValidatedQuery(query): ValidatedQuery<ListPublicProductsQuery>,
-) -> Result<([(HeaderName, String); 1], Json<Vec<Product>>), AppError> {
+) -> Result<([(HeaderName, String); 1], Json<Vec<ProductListItem>>), AppError> {
     let (products, total) = product_service::list_products(&state.db, query).await?;
     Ok((total_count(total), Json(products)))
 }

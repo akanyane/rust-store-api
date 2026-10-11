@@ -51,6 +51,23 @@ pub async fn decrement_stock(
     Ok(rows.into_iter().next())
 }
 
+/// Variantes ATIVAS de vários produtos de uma vez, para a listagem não fazer uma consulta por
+/// produto.
+pub async fn find_active_by_products(
+    ex: &Executor<'_>,
+    products: Vec<RecordId>,
+) -> surrealdb::Result<Vec<VariantRecord>> {
+    if products.is_empty() {
+        return Ok(Vec::new());
+    }
+    ex.query_all(
+        "SELECT * FROM variant WHERE product IN $products AND active = true",
+        "products",
+        products,
+    )
+    .await
+}
+
 /// Variantes do produto por nome e, em empate, por SKU (que é único, então a ordem é total).
 /// É o único ponto de leitura da lista, então a lista pública, o detalhe público e o detalhe
 /// de admin seguem a mesma ordem.

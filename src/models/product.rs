@@ -24,6 +24,18 @@ pub struct Product {
     pub created_at: Option<DateTime<Utc>>,
 }
 
+/// Item da listagem pública: o produto de sempre mais a faixa de preço das variantes ATIVAS
+/// (as inativas não podem ser compradas, então não contam). Os dois valem `null` quando o
+/// produto não tem nenhuma variante ativa. O cliente mostra "from X" só quando
+/// `price_from` e `price_to` diferem.
+#[derive(Debug, Serialize)]
+pub struct ProductListItem {
+    #[serde(flatten)]
+    pub product: Product,
+    pub price_from: Option<i64>,
+    pub price_to: Option<i64>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ProductDetail {
     pub id: String,

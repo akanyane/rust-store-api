@@ -1,23 +1,29 @@
+use std::collections::HashMap;
+
 use chrono::Utc;
-use surrealdb::{Surreal, engine::any::Any, types::Datetime};
+use surrealdb::{
+    Surreal,
+    engine::any::Any,
+    types::{Datetime, RecordId},
+};
 
 use crate::error::AppError;
 use crate::executor::Executor;
 use crate::models::product::{
     CreateProduct, ListProductsQuery, ListPublicProductsQuery, NO_LIMIT, NewProduct, Product,
-    ProductChanges, ProductDetail, ProductPage, ProductRecord, UpdateProduct,
+    ProductChanges, ProductDetail, ProductListItem, ProductPage, ProductRecord, UpdateProduct,
 };
 use crate::models::variant::{NewVariant, Variant};
 use crate::models::{DEFAULT_PAGE_SIZE, id_to_string};
 use crate::repositories::{product as product_repo, variant as variant_repo};
 
-/// Produtos ativos e o total de ativos (independente da página). Sem `limit`, devolve todos.
-/// A contagem e a página são duas leituras: um produto criado entre elas pode deixar o
-/// total defasado em uma unidade.
+/// Produtos ativos com a faixa de preço das variantes ativas, e o total de ativos (independente
+/// da página). Sem `limit`, devolve todos. A contagem e a página são duas leituras: um produto
+/// criado entre elas pode deixar o total defasado em uma unidade.
 pub async fn list_products(
     db: &Surreal<Any>,
     query: ListPublicProductsQuery,
-) -> Result<(Vec<Product>, i64), AppError> {
+) -> Result<(Vec<ProductListItem>, i64), AppError> {
     let ex = Executor::Db(db);
     let sort = query.sort.unwrap_or_default();
     let limit = query.limit.unwrap_or(NO_LIMIT);
@@ -25,7 +31,33 @@ pub async fn list_products(
 
     let records = product_repo::find_active(&ex, sort, limit, offset).await?;
     let total = product_repo::count_active(&ex).await?;
-    Ok((records.into_iter().map(Product::from).collect(), total))
+
+    // Uma consulta para as variantes ativas de todos os produtos da página (sem N+1), e a
+    // menor e a maior faixa de preço por produto.
+    let product_ids: Vec<RecordId> = records.iter().map(|record| record.id.clone()).collect();
+    let mut ranges: HashMap<String, (i64, i64)> = HashMap::new();
+    for variant in variant_repo::find_active_by_products(&ex, product_ids).await? {
+        ranges
+            .entry(id_to_string(&variant.product))
+            .and_modify(|(low, high)| {
+                *low = (*low).min(variant.price);
+                *high = (*high).max(variant.price);
+            })
+            .or_insert((variant.price, variant.price));
+    }
+
+    let items = records
+        .into_iter()
+        .map(|record| {
+            let range = ranges.get(&id_to_string(&record.id)).copied();
+            ProductListItem {
+                product: Product::from(record),
+                price_from: range.map(|(low, _)| low),
+                price_to: range.map(|(_, high)| high),
+            }
+        })
+        .collect();
+    Ok((items, total))
 }
 
 pub async fn get_product(db: &Surreal<Any>, id: &str) -> Result<ProductDetail, AppError> {

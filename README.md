@@ -39,7 +39,7 @@ Acesso: **pública**, **cliente** (Bearer token de um cliente) ou **admin** (Bea
 | POST | `/auth/sign-in` | pública | Login; devolve `session_token` e `refresh_token` |
 | POST | `/auth/sign-out` | pública | Encerra a sessão a partir do `refresh_token` |
 | POST | `/auth/refresh` | pública | Troca um `refresh_token` por um par novo de tokens |
-| GET | `/products` | pública | Lista os produtos ativos (`?sort=`, `?limit=`, `?offset=`; total em `X-Total-Count`) |
+| GET | `/products` | pública | Lista os produtos ativos (`?sort=`, `?limit=`, `?offset=`; total em `X-Total-Count`; com `price_from` e `price_to`) |
 | POST | `/products` | admin | Cria produto |
 | GET | `/products/{id}` | pública | Detalha produto |
 | GET | `/products/{id}/variants` | pública | Lista variantes do produto |
@@ -138,6 +138,10 @@ Todo pedido traz `paid_at`: o instante em que ele virou `paid`, gravado pelo ban
 `GET /products` devolve os produtos ativos por nome e, em empate, por id. Com `?sort=newest` vêm do mais recente para o mais antigo, e os produtos sem data de criação ficam no fim; `?sort=name` é o padrão. Valor de `sort` desconhecido devolve `422`, e parâmetros que a rota não conhece são ignorados.
 
 As variantes (`GET /products/{id}/variants`, o `variants` do detalhe público e o do detalhe de admin) vêm por nome e, em empate, por SKU (que é único, então a ordem é sempre a mesma). Não há `sort` nem paginação para elas. A ordenação por nome usa a colação Unicode do SurrealDB (`COLLATE`): ignora diferenças de maiúsculas e minúsculas e coloca letras acentuadas junto das demais (`Álamo`, `alpha`, `Beta`, `zebra`, `Zed`), e vale para produtos e variantes. Ela **não** faz ordem natural de números dentro do texto (`Item 10` vem antes de `Item 2`) nem tem ajuste específico para o português. Nomes que só diferem na caixa ficam juntos, numa ordem estável entre chamadas.
+
+## Faixa de preço na listagem pública
+
+Cada produto de `GET /products` traz `price_from` (o menor preço entre as variantes **ativas**) e `price_to` (o maior), em unidades. O cliente mostra "from X" só quando os dois diferem. As variantes inativas não contam, porque não podem ser compradas; estoque zero não tira a variante do cálculo. Se o produto não tem nenhuma variante ativa, os dois valem `null`. Os campos são acrescentados ao formato de sempre (`id`, `name`, `description`, `active`, `created_at`), que não mudou. Só a listagem pública os traz: o detalhe já lista as variantes, e as respostas de admin e de criar ou editar produto ficam como estavam.
 
 ## Paginação da listagem pública
 
