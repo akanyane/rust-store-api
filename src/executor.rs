@@ -68,6 +68,18 @@ impl Executor<'_> {
         }
     }
 
+    /// Roda um SELECT sem parâmetros e devolve todas as linhas.
+    pub async fn query_rows<R>(&self, sql: &str) -> surrealdb::Result<Vec<R>>
+    where
+        R: SurrealValue,
+    {
+        let mut response = match self {
+            Executor::Db(db) => db.query(sql.to_string()).await?,
+            Executor::Tx(tx) => tx.query(sql.to_string()).await?,
+        };
+        response.take(0)
+    }
+
     /// Roda um SELECT com um parâmetro nomeado (`$name`) e devolve todas as linhas.
     pub async fn query_all<R, V>(
         &self,

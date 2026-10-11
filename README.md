@@ -46,6 +46,7 @@ The web storefront and admin console that talk to this API live in
   [creation date](#creation-date)
 - [Cart and checkout](#cart-and-checkout)
 - [Orders and payment](#orders-and-payment)
+- [Admin dashboard numbers](#admin-dashboard-numbers)
 - [Conventions](#conventions): currency, validation
 - [Project layout](#project-layout) · [Tests](#tests) · [Known limitations](#known-limitations)
 
@@ -140,6 +141,7 @@ Access is **public**, **customer** (Bearer token of a customer) or **admin**
 | GET | `/admin/orders` | admin | Lists every customer's orders (`?status=`, `?limit=`, `?offset=`; total in `X-Total-Count`) |
 | GET | `/admin/orders/{id}` | admin | Any order |
 | PUT | `/admin/orders/{id}/status` | admin | Changes the order's status |
+| GET | `/admin/stats` | admin | Numbers for the admin dashboard: orders per status, revenue, product counts and low stock |
 
 ## Authentication
 
@@ -287,6 +289,26 @@ the real date was not stored and is not invented.
 **Admin list.** `GET /admin/orders` lists from newest to oldest, with `limit`
 (1 to 200, default 50) and `offset`. Each order carries only the owner's
 `customer_id`, with no personal data. Invalid parameters return `422`.
+
+## Admin dashboard numbers
+
+`GET /admin/stats` returns what a dashboard needs in one call:
+
+```json
+{
+  "orders": { "total": 5, "pending": 1, "paid": 1, "shipped": 1, "delivered": 1, "cancelled": 1 },
+  "revenue": 60,
+  "products": { "active": 3, "inactive": 1 },
+  "low_stock": [
+    { "product_id": "…", "product_name": "Tote", "variant_id": "…", "variant_name": "Large", "sku": "TOTE-L", "stock": 2 }
+  ]
+}
+```
+
+- `revenue` is the sum of `total` of orders that are `paid`, `shipped` or `delivered`, in units. `pending` and `cancelled` orders are not revenue.
+- `low_stock` lists **active** variants of **active** products with **5 units or fewer** (zero included), emptiest first and then by SKU, at most **10**. The threshold and the limit are fixed in the service.
+- With no orders or products the counts are `0` and `low_stock` is `[]`.
+- The counts and the list are separate reads, so a sale made in between can leave one number off by one relative to another.
 
 ## Conventions
 

@@ -4,6 +4,7 @@
 
 mod admin_orders;
 mod admin_products;
+mod admin_stats;
 mod auth;
 mod cart;
 mod catalog;

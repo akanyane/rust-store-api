@@ -11,3 +11,4 @@ use axum::http::HeaderName;
 pub fn total_count(total: i64) -> [(HeaderName, String); 1] {
     [(HeaderName::from_static("x-total-count"), total.to_string())]
 }
+pub mod stats;

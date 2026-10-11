@@ -5,5 +5,6 @@ pub mod order;
 pub mod order_item;
 pub mod product;
 pub mod session;
+pub mod stats;
 pub mod user;
 pub mod variant;

@@ -57,3 +57,4 @@ pub fn id_to_string(id: &RecordId) -> String {
         outra => format!("{outra:?}"),
     }
 }
+pub mod stats;

@@ -18,6 +18,7 @@ use handlers::cart as cart_handlers;
 use handlers::customer as customer_handlers;
 use handlers::order as order_handlers;
 use handlers::product as product_handlers;
+use handlers::stats as stats_handlers;
 use handlers::variant as variant_handlers;
 use services::auth as auth_service;
 use state::AppState;
@@ -117,6 +118,7 @@ fn build_router(state: AppState) -> Router {
             "/admin/products/{id}",
             get(product_handlers::admin_get_product),
         )
+        .route("/admin/stats", get(stats_handlers::admin_stats))
         .route("/admin/orders", get(order_handlers::admin_list_orders))
         .route("/admin/orders/{id}", get(order_handlers::admin_get_order))
         .route(
