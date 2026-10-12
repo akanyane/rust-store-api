@@ -48,6 +48,7 @@ The web storefront and admin console that talk to this API live in
 - [Orders and payment](#orders-and-payment)
 - [Admin dashboard numbers](#admin-dashboard-numbers)
 - [Customer view for admins](#customer-view-for-admins)
+- [Customer list for admins](#customer-list-for-admins)
 - [Conventions](#conventions): currency, validation
 - [Project layout](#project-layout) · [Tests](#tests) · [Known limitations](#known-limitations)
 
@@ -143,6 +144,7 @@ Access is **public**, **customer** (Bearer token of a customer) or **admin**
 | GET | `/admin/orders/{id}` | admin | Any order |
 | PUT | `/admin/orders/{id}/status` | admin | Changes the order's status |
 | GET | `/admin/stats` | admin | Numbers for the admin dashboard: orders per status, revenue, product counts and low stock |
+| GET | `/admin/customers` | admin | Lists customer accounts with their activity (`?q=`, `?sort=newest\|username`, `?limit=`, `?offset=`; total in `X-Total-Count`; no personal data) |
 | GET | `/admin/customers/{id}` | admin | A customer's username, orders per status, amount spent and last order (no personal data) |
 
 ## Authentication
@@ -342,6 +344,23 @@ meaning). There is no search by customer name: the admin never sees one.
 - `spent` is the sum of `total` of the customer's `paid`, `shipped` and `delivered` orders, in units (the same rule as the dashboard's `revenue`).
 - Only the `username` is shown: the name and the birthday stay stored but are never part of an admin response. The customer's orders are listed with `GET /admin/orders?q=<id>`.
 - An unknown id, or the admin's own id (an admin has no customer profile), is a `404`.
+
+## Customer list for admins
+
+`GET /admin/customers` lists customer accounts (never the admin) with what each one did, in one call:
+
+```json
+[
+  { "id": "…", "username": "ana", "created_at": "2026-10-11T22:02:00Z", "orders": 6, "spent": 250, "last_order_at": "2026-10-11T22:10:00Z" }
+]
+```
+
+- `?q=` finds accounts by **username** or **id**, always as a **prefix**, ignoring case, surrounding spaces and a leading `#` (the same rules as the order search). A blank `q` means no search, a term over 64 characters is a `422`, and the term is only ever compared as text.
+- `?sort=newest` (default) lists the newest accounts first; `?sort=username` lists A to Z. The id breaks ties, so the order never wobbles between pages. Any other `sort` is a `422`.
+- `?limit=` (1 to 200, default 50) and `?offset=` paginate, and `X-Total-Count` counts every account that matches the search, regardless of the page.
+- `orders` counts the customer's orders of any status, `spent` is the sum of `total` of the `paid`, `shipped` and `delivered` ones (in units), and `last_order_at` is `null` for someone who never bought. The activity of the whole page comes from a single query, not one per customer.
+- Like the single-customer view, it shows the username only: no name, birthday or any other personal data.
+- The accounts and the orders are separate reads, so a purchase made in between can leave a number off by one.
 
 ## Conventions
 

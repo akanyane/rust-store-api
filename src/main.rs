@@ -120,6 +120,10 @@ fn build_router(state: AppState) -> Router {
         )
         .route("/admin/stats", get(stats_handlers::admin_stats))
         .route(
+            "/admin/customers",
+            get(customer_handlers::admin_list_customers),
+        )
+        .route(
             "/admin/customers/{id}",
             get(customer_handlers::admin_get_customer),
         )

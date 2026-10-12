@@ -2,7 +2,7 @@ use surrealdb::types::{Datetime, RecordId};
 
 use crate::executor::Executor;
 use crate::models::CountRow;
-use crate::models::customer::CreatedAtRow;
+use crate::models::customer::{CreatedAtRow, CustomerOrderRow};
 use crate::models::order::{NewOrder, OrderFilter, OrderPage, OrderRecord, StatusChange};
 use crate::models::stats::OrderStatusRow;
 
@@ -154,4 +154,23 @@ pub async fn last_created_at(
         )
         .await?;
     Ok(rows.into_iter().next().map(|row| row.created_at))
+}
+
+/// Pedidos, soma de totais e data do mais recente de VÁRIOS clientes por status, numa consulta
+/// só (a listagem de clientes não faz uma consulta por cliente).
+pub async fn totals_by_customers(
+    ex: &Executor<'_>,
+    customers: Vec<RecordId>,
+) -> surrealdb::Result<Vec<CustomerOrderRow>> {
+    if customers.is_empty() {
+        return Ok(Vec::new());
+    }
+    ex.query_all(
+        "SELECT customer, status, count() AS count, math::sum(total) AS revenue, \
+         time::max(created_at) AS last \
+         FROM order WHERE customer IN $customers GROUP BY customer, status",
+        "customers",
+        customers,
+    )
+    .await
 }
