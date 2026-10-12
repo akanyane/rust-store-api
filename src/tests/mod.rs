@@ -6,6 +6,7 @@ mod admin_customer_list;
 mod admin_customers;
 mod admin_order_search;
 mod admin_orders;
+mod admin_orders_export;
 mod admin_products;
 mod admin_stats;
 mod auth;

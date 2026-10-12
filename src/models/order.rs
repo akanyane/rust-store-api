@@ -187,3 +187,13 @@ pub struct StatusChange {
     pub from: String,
     pub to: String,
 }
+
+/// Filtros da exportação: os mesmos da listagem de admin, sem página (o arquivo traz tudo o que
+/// casa, até o teto).
+#[derive(Debug, Deserialize, Validate)]
+pub struct ExportOrdersQuery {
+    pub status: Option<OrderStatus>,
+    /// Número do pedido (com ou sem `#`) ou id do cliente, por prefixo.
+    #[validate(length(max = 64, message = "must be at most 64 characters"))]
+    pub q: Option<String>,
+}

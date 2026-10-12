@@ -141,6 +141,7 @@ Access is **public**, **customer** (Bearer token of a customer) or **admin**
 | POST | `/orders/{id}/cancel` | customer | Cancels a pending order and returns the stock |
 | POST | `/orders/{id}/pay` | customer | Simulated payment of a pending order |
 | GET | `/admin/orders` | admin | Lists every customer's orders (`?status=`, `?q=`, `?limit=`, `?offset=`; total in `X-Total-Count`) |
+| GET | `/admin/orders/export.csv` | admin | Downloads the orders that match `?status=` and `?q=` as a CSV file (newest first, up to 10,000) |
 | GET | `/admin/orders/{id}` | admin | Any order |
 | PUT | `/admin/orders/{id}/status` | admin | Changes the order's status |
 | GET | `/admin/stats` | admin | Numbers for the admin dashboard: orders per status, revenue, product counts and low stock |
@@ -293,6 +294,15 @@ the real date was not stored and is not invented.
 **Admin list.** `GET /admin/orders` lists from newest to oldest, with `limit`
 (1 to 200, default 50) and `offset`. Each order carries only the owner's
 `customer_id`, with no personal data. Invalid parameters return `422`.
+
+**Export.** `GET /admin/orders/export.csv` downloads the orders that match `?status=` and `?q=` (the same rules as the list, without `limit` and `offset`) as a CSV file, newest first:
+
+```
+order_id,order_number,customer_id,status,items,units,total,created_at,paid_at
+8npad4p5x4nseybo27cc,#8NPAD4P5,rwal4tkuhd7nuceidwo0,paid,1,2,50,2026-10-11T16:57:00Z,2026-10-11T17:02:10Z
+```
+
+`items` is the number of lines of the order, `units` the sum of the quantities, `total` is in units, and `paid_at` is empty until the order is paid. Only ids, numbers, statuses and dates are exported: no product names and no personal data. Lines end in CRLF (RFC 4180), text that starts with `=`, `+`, `-` or `@` is neutralised against spreadsheet formulas, and the response is a download (`Content-Type: text/csv; charset=utf-8`, `Content-Disposition: attachment; filename="orders-YYYY-MM-DD.csv"`). `X-Total-Count` says how many orders match. The file holds at most the **10,000 newest** orders, and `X-Export-Truncated: true` is sent when more match than fit. `status` or `q` that are invalid are a `422`.
 
 **Search.** `?q=` finds orders by the **order number** shown on screen (the first 8
 characters of the id, with or without the `#`, or the whole id) or by the

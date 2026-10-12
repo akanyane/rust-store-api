@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use surrealdb::{Surreal, engine::any::Any, types::RecordId};
 
 use crate::error::AppError;
 use crate::executor::Executor;
 use crate::models::cart_item::CartItemRecord;
 use crate::models::order::{
-    AdminOrderView, ListOrdersQuery, NewOrder, NewOrderItem, OrderFilter, OrderItemRecord,
-    OrderItemView, OrderPage, OrderRecord, OrderStatus, OrderView, StatusChange, search_term,
+    AdminOrderView, ExportOrdersQuery, ListOrdersQuery, NewOrder, NewOrderItem, OrderFilter,
+    OrderItemRecord, OrderItemView, OrderPage, OrderRecord, OrderStatus, OrderView, StatusChange,
+    search_term,
 };
 use crate::models::product::ProductRecord;
 use crate::models::variant::VariantRecord;
@@ -18,6 +19,7 @@ use crate::repositories::{
     cart as cart_repo, cart_item as cart_item_repo, customer as customer_repo, order as order_repo,
     order_item as order_item_repo, product as product_repo, variant as variant_repo,
 };
+use crate::services::csv;
 
 const MAX_ATTEMPTS: u32 = 5;
 
@@ -510,4 +512,82 @@ async fn admin_update_status_in_tx(
         customer_id,
         order: view,
     })
+}
+
+/// O mais que uma exportação traz: os pedidos mais recentes até aqui.
+pub const EXPORT_LIMIT: i64 = 10_000;
+
+/// Os pedidos que casam com o filtro e a busca, como CSV: uma linha por pedido, do mais recente
+/// para o mais antigo, só com ids e números (sem nome de produto nem dado pessoal). Devolve o
+/// arquivo e o total que casa, que passa de `EXPORT_LIMIT` quando o arquivo foi cortado.
+pub async fn admin_export_orders_csv(
+    db: &Surreal<Any>,
+    query: ExportOrdersQuery,
+) -> Result<(String, i64, bool), AppError> {
+    export_orders_csv(db, query, EXPORT_LIMIT).await
+}
+
+/// Como `admin_export_orders_csv`, com o teto dado. O último valor diz se o arquivo foi cortado
+/// (há mais pedidos que casam do que linhas no arquivo).
+pub(crate) async fn export_orders_csv(
+    db: &Surreal<Any>,
+    query: ExportOrdersQuery,
+    limit: i64,
+) -> Result<(String, i64, bool), AppError> {
+    let ex = Executor::Db(db);
+    let status = query.status.map(|status| status.as_str().to_string());
+    let search = search_term(query.q.as_deref());
+    let page = OrderPage {
+        status: status.clone(),
+        search: search.clone(),
+        limit,
+        offset: 0,
+    };
+
+    let orders = order_repo::find_page(&ex, page).await?;
+    let written = orders.len() as i64;
+    let owners: Vec<String> = orders
+        .iter()
+        .map(|order| id_to_string(&order.customer))
+        .collect();
+    let views = views_for(&ex, orders).await?;
+    let total = order_repo::count_matching(&ex, OrderFilter { status, search }).await?;
+
+    let mut csv = csv::row(
+        &[
+            "order_id",
+            "order_number",
+            "customer_id",
+            "status",
+            "items",
+            "units",
+            "total",
+            "created_at",
+            "paid_at",
+        ]
+        .map(String::from),
+    );
+    for (customer_id, order) in owners.into_iter().zip(views) {
+        let number: String = order.id.chars().take(8).collect::<String>().to_uppercase();
+        csv.push_str(&csv::row(&[
+            csv::text(&order.id),
+            csv::text(&format!("#{number}")),
+            csv::text(&customer_id),
+            csv::text(&order.status),
+            order.items.len().to_string(),
+            order
+                .items
+                .iter()
+                .map(|item| i64::from(item.quantity))
+                .sum::<i64>()
+                .to_string(),
+            order.total.to_string(),
+            order.created_at.to_rfc3339_opts(SecondsFormat::Secs, true),
+            order
+                .paid_at
+                .map(|at| at.to_rfc3339_opts(SecondsFormat::Secs, true))
+                .unwrap_or_default(),
+        ]));
+    }
+    Ok((csv, total, total > written))
 }
