@@ -1,9 +1,10 @@
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
-use surrealdb::types::{RecordId, SurrealValue};
+use surrealdb::types::{Datetime, RecordId, SurrealValue};
 use validator::Validate;
 
 use super::id_to_string;
+use super::stats::OrderCounts;
 
 /// Perfil do cliente. O username vive no `user` de mesma chave.
 #[derive(Debug, Clone, SurrealValue)]
@@ -67,4 +68,25 @@ impl Customer {
             birthday: record.birthday,
         }
     }
+}
+
+/// Uma linha de `SELECT created_at ...` da data do último pedido.
+#[derive(Debug, SurrealValue)]
+pub struct CreatedAtRow {
+    pub created_at: Datetime,
+}
+
+/// A visão de admin de um cliente: quem é (só o username) e o que fez. Nome, nascimento e
+/// qualquer outro dado pessoal ficam de fora de propósito.
+#[derive(Debug, Serialize)]
+pub struct AdminCustomerView {
+    pub id: String,
+    pub username: String,
+    /// Quando a conta foi criada.
+    pub created_at: DateTime<Utc>,
+    pub orders: OrderCounts,
+    /// Soma do total dos pedidos pagos, enviados e entregues, em unidades.
+    pub spent: i64,
+    /// `None` para quem ainda não comprou.
+    pub last_order_at: Option<DateTime<Utc>>,
 }

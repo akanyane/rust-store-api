@@ -47,6 +47,7 @@ The web storefront and admin console that talk to this API live in
 - [Cart and checkout](#cart-and-checkout)
 - [Orders and payment](#orders-and-payment)
 - [Admin dashboard numbers](#admin-dashboard-numbers)
+- [Customer view for admins](#customer-view-for-admins)
 - [Conventions](#conventions): currency, validation
 - [Project layout](#project-layout) · [Tests](#tests) · [Known limitations](#known-limitations)
 
@@ -142,6 +143,7 @@ Access is **public**, **customer** (Bearer token of a customer) or **admin**
 | GET | `/admin/orders/{id}` | admin | Any order |
 | PUT | `/admin/orders/{id}/status` | admin | Changes the order's status |
 | GET | `/admin/stats` | admin | Numbers for the admin dashboard: orders per status, revenue, product counts and low stock |
+| GET | `/admin/customers/{id}` | admin | A customer's username, orders per status, amount spent and last order (no personal data) |
 
 ## Authentication
 
@@ -320,6 +322,26 @@ meaning). There is no search by customer name: the admin never sees one.
 - `low_stock` lists **active** variants of **active** products with **5 units or fewer** (zero included), emptiest first and then by SKU, at most **10**. The threshold and the limit are fixed in the service.
 - With no orders or products the counts are `0` and `low_stock` is `[]`.
 - The counts and the list are separate reads, so a sale made in between can leave one number off by one relative to another.
+
+## Customer view for admins
+
+`GET /admin/customers/{id}` answers "who is this customer and what did they do" without exposing personal data:
+
+```json
+{
+  "id": "…",
+  "username": "ana",
+  "created_at": "2026-10-11T22:02:00Z",
+  "orders": { "total": 3, "pending": 1, "paid": 1, "shipped": 0, "delivered": 1, "cancelled": 0 },
+  "spent": 125,
+  "last_order_at": "2026-10-11T22:10:00Z"
+}
+```
+
+- `created_at` is when the account was created; `last_order_at` is `null` for someone who never bought.
+- `spent` is the sum of `total` of the customer's `paid`, `shipped` and `delivered` orders, in units (the same rule as the dashboard's `revenue`).
+- Only the `username` is shown: the name and the birthday stay stored but are never part of an admin response. The customer's orders are listed with `GET /admin/orders?q=<id>`.
+- An unknown id, or the admin's own id (an admin has no customer profile), is a `404`.
 
 ## Conventions
 

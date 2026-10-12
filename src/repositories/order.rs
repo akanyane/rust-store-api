@@ -1,8 +1,10 @@
-use surrealdb::types::RecordId;
+use surrealdb::types::{Datetime, RecordId};
 
 use crate::executor::Executor;
 use crate::models::CountRow;
+use crate::models::customer::CreatedAtRow;
 use crate::models::order::{NewOrder, OrderFilter, OrderPage, OrderRecord, StatusChange};
+use crate::models::stats::OrderStatusRow;
 
 pub async fn create(ex: &Executor<'_>, data: NewOrder) -> surrealdb::Result<Option<OrderRecord>> {
     ex.create("order", data).await
@@ -121,4 +123,35 @@ pub async fn count_matching(ex: &Executor<'_>, filter: OrderFilter) -> surrealdb
         .await?;
     // Sem nenhum registro o `GROUP ALL` pode não devolver linha nenhuma.
     Ok(rows.first().map_or(0, |row| row.count))
+}
+
+/// Quantos pedidos e que soma de totais o cliente tem em cada status. Status sem pedidos
+/// não vêm.
+pub async fn totals_by_customer(
+    ex: &Executor<'_>,
+    customer: RecordId,
+) -> surrealdb::Result<Vec<OrderStatusRow>> {
+    ex.query_all(
+        "SELECT status, count() AS count, math::sum(total) AS revenue \
+         FROM order WHERE customer = $customer GROUP BY status",
+        "customer",
+        customer,
+    )
+    .await
+}
+
+/// Quando o cliente fez o pedido mais recente, ou `None` se nunca comprou.
+pub async fn last_created_at(
+    ex: &Executor<'_>,
+    customer: RecordId,
+) -> surrealdb::Result<Option<Datetime>> {
+    let rows: Vec<CreatedAtRow> = ex
+        .query_all(
+            "SELECT created_at FROM order WHERE customer = $customer \
+             ORDER BY created_at DESC LIMIT 1",
+            "customer",
+            customer,
+        )
+        .await?;
+    Ok(rows.into_iter().next().map(|row| row.created_at))
 }

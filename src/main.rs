@@ -119,6 +119,10 @@ fn build_router(state: AppState) -> Router {
             get(product_handlers::admin_get_product),
         )
         .route("/admin/stats", get(stats_handlers::admin_stats))
+        .route(
+            "/admin/customers/{id}",
+            get(customer_handlers::admin_get_customer),
+        )
         .route("/admin/orders", get(order_handlers::admin_list_orders))
         .route("/admin/orders/{id}", get(order_handlers::admin_get_order))
         .route(

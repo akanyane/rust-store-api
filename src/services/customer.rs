@@ -1,13 +1,17 @@
+use chrono::{DateTime, Utc};
 use surrealdb::{Surreal, engine::any::Any, types::RecordId};
 
 use crate::error::AppError;
 use crate::executor::Executor;
-use crate::models::customer::{Customer, CustomerRecord, NewCustomer, UpdateCustomer};
+use crate::models::customer::{
+    AdminCustomerView, Customer, CustomerRecord, NewCustomer, UpdateCustomer,
+};
 use crate::models::id_to_string;
 use crate::repositories::{
     cart as cart_repo, cart_item as cart_item_repo, customer as customer_repo, order as order_repo,
     session as session_repo, user as user_repo,
 };
+use crate::services::stats::summarize_orders;
 
 /// O username mora no user de mesma chave. Cliente sem user é inconsistência de dados.
 async fn username_of(ex: &Executor<'_>, id: &str) -> Result<String, AppError> {
@@ -97,4 +101,32 @@ async fn delete_in_tx(ex: &Executor<'_>, id: &str) -> Result<(), AppError> {
     customer_repo::delete(ex, id).await?;
     user_repo::delete(ex, id).await?;
     Ok(())
+}
+
+/// Visão de admin de um cliente: só o username e o que ele fez. Quem não é cliente (id
+/// inexistente, ou o admin, que não tem perfil) dá 404.
+pub async fn admin_get_customer(
+    db: &Surreal<Any>,
+    id: &str,
+) -> Result<AdminCustomerView, AppError> {
+    let ex = Executor::Db(db);
+    let record = customer_repo::find_by_id(&ex, id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let user = user_repo::find_by_id(&ex, id)
+        .await?
+        .ok_or_else(|| AppError::Internal("customer without an associated user".to_string()))?;
+
+    let (orders, spent) =
+        summarize_orders(order_repo::totals_by_customer(&ex, record.id.clone()).await?);
+    let last_order_at = order_repo::last_created_at(&ex, record.id.clone()).await?;
+
+    Ok(AdminCustomerView {
+        id: id_to_string(&record.id),
+        username: user.username,
+        created_at: DateTime::<Utc>::from(user.created_at),
+        orders,
+        spent,
+        last_order_at: last_order_at.map(DateTime::<Utc>::from),
+    })
 }
